@@ -47,10 +47,10 @@ PREV_MAP = dict(PREV_PATTERN_CHOICES)
 DEFAULTS = {
     "prev_label": "不知道",
     "strategy": "kelly",
-    "buy_price": None,
-    "bought_qty": None,
-    **{f"p_{i}": None for i in range(N_SLOTS)},
-    **{f"s_{i}": None for i in range(N_SLOTS)},
+    "buy_price": "",
+    "bought_qty": "",
+    **{f"p_{i}": "" for i in range(N_SLOTS)},
+    **{f"s_{i}": "" for i in range(N_SLOTS)},
 }
 
 st.set_page_config(page_title="大頭菜買賣顧問", page_icon="🥬", layout="wide")
@@ -86,18 +86,17 @@ def init_state():
     except Exception:
         saved = {}
     for k, dv in DEFAULTS.items():
-        ss[k] = saved.get(k, dv)
-    try:
-        ss["budget"] = int(_ls_get("turnip_budget") or 1_000_000)
-    except Exception:
-        ss["budget"] = 1_000_000
+        raw = saved.get(k, dv)
+        # 全部以字串存放 (text_input); 舊資料若是數字/0/None 一律正規化
+        ss[k] = "" if raw in (None, 0, "0") else str(raw)
+    ss["budget"] = str(_ls_get("turnip_budget") or "1000000")
     ss["_init"] = True
 
 
 def persist_state():
     ss = st.session_state
     _ls_set("turnip_state", json.dumps({k: ss[k] for k in DEFAULTS}))
-    _ls_set("turnip_budget", str(int(ss["budget"])))
+    _ls_set("turnip_budget", str(ss["budget"]))
 
 
 def clear_data():
@@ -109,6 +108,40 @@ def clear_data():
 @st.cache_resource(show_spinner=False)
 def load_advisor():
     return get_advisor()
+
+
+def _pint(s):
+    """文字輸入 -> 正整數; 空白/非數字/<=0 一律視為未填 (回 None)。"""
+    try:
+        v = int(str(s).strip())
+        return v if v > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def validate_inputs():
+    """送出後若不是合法數字就清空: 價格須正整數; 顆數須正整數且為 10 的倍數。"""
+    ss = st.session_state
+    for k in ["budget", "buy_price"] + [f"p_{i}" for i in range(N_SLOTS)]:
+        s = str(ss.get(k, "")).strip()
+        if s and _pint(s) is None:
+            ss[k] = ""
+    for k in ["bought_qty"] + [f"s_{i}" for i in range(N_SLOTS)]:
+        s = str(ss.get(k, "")).strip()
+        if s:
+            v = _pint(s)
+            if v is None or v % 10 != 0:
+                ss[k] = ""
+
+
+def numeric_keyboard():
+    """把所有文字輸入框設成數字鍵盤 (手機彈出數字鍵)。"""
+    st.html(
+        "<script>"
+        "const f=()=>{document.querySelectorAll('[data-testid=\"stTextInput\"] input').forEach(e=>{"
+        "e.setAttribute('inputmode','numeric');e.setAttribute('pattern','[0-9]*');});};"
+        "f();new MutationObserver(f).observe(document.body,{childList:true,subtree:true});"
+        "</script>", unsafe_allow_javascript=True)
 
 
 # --------------------------------------------------------------------------
@@ -279,7 +312,9 @@ def render_chart(res, buy):
 # --------------------------------------------------------------------------
 def main():
     inject_css()
+    numeric_keyboard()
     init_state()
+    validate_inputs()
     ss = st.session_state
     advisor = load_advisor()
 
@@ -299,42 +334,38 @@ def main():
 
     prev_pattern = PREV_MAP[ss["prev_label"]]
     strategy = ss["strategy"]
-    budget = int(ss["budget"])
 
     # ===== 星期日: 買入 =====
     with st.container(border=True):
         st.markdown("#### ☀️ 星期日 · 買入")
         c1, c2, c3, c4 = st.columns([1, 1, 1.1, 1])
-        c1.number_input("預算（鈴錢）", min_value=0, step=1, key="budget")
-        c2.number_input("買入價格", max_value=110, step=1, key="buy_price")  # 不設 min 才能清空
-        budget = int(ss["budget"] or 0)
-        buy_price = int(ss["buy_price"]) if ss["buy_price"] and int(ss["buy_price"]) > 0 else 0
-        if buy_price and buy_price < 90:
+        c1.text_input("預算（鈴錢）", key="budget")
+        c2.text_input("買入價格", key="buy_price")
+        budget = _pint(ss["budget"]) or 0
+        buy_price = _pint(ss["buy_price"]) or 0
+        if buy_price and not (90 <= buy_price <= 110):
             st.markdown("<div class='warn'>買價通常是 90~110</div>", unsafe_allow_html=True)
-        if buy_price >= 90:
+        if 90 <= buy_price <= 110:
             res0 = advise(advisor, buy_price, prev_pattern, observed=[], budget=budget, holding=0)
             b = res0["buy"][strategy]
             c3.markdown(f"<div class='sub'>建議買入</div><div class='big-num'>{fmt(b['qty'])} 顆</div>"
                         f"<div class='sub'>約 {fmt(b['bells'])} 鈴 · {b['tag']}</div>",
                         unsafe_allow_html=True)
-            c4.number_input("實際買入顆數", step=1, key="bought_qty")
+            c4.text_input("實際買入顆數", key="bought_qty")
         else:
             c3.markdown("<div class='hint'>輸入買價後顯示建議</div>", unsafe_allow_html=True)
 
-    buy_price = int(ss["buy_price"]) if ss["buy_price"] and int(ss["buy_price"]) > 0 else 0
-    bought_qty = (round_down_10(ss["bought_qty"])
-                  if ss["bought_qty"] and int(ss["bought_qty"]) > 0 else 0)
+    in_range = 90 <= buy_price <= 110
+    bought_qty = _pint(ss["bought_qty"]) or 0
 
     # 讀週間價格 + 算每格持有量 (未填 = None, 由其他價格推估補上)
-    prices = [(int(ss[f"p_{i}"]) if ss[f"p_{i}"] and int(ss[f"p_{i}"]) > 0 else None)
-              for i in range(N_SLOTS)]
+    prices = [_pint(ss[f"p_{i}"]) for i in range(N_SLOTS)]
     known = [i for i, v in enumerate(prices) if v is not None]
     cur_slot = max(known) if known else None
     holding_at, h = [0] * N_SLOTS, bought_qty
     for i in range(N_SLOTS):
         holding_at[i] = h
-        sold_i = round_down_10(ss[f"s_{i}"]) if ss[f"s_{i}"] and int(ss[f"s_{i}"]) > 0 else 0
-        h -= min(sold_i, h)
+        h -= min(_pint(ss[f"s_{i}"]) or 0, h)
     remaining = h
 
     # ===== 週間: 賣出 (雙欄, 週一~三 / 週四~六) =====
@@ -351,23 +382,23 @@ def main():
                 for ap in range(2):
                     i = d * 2 + ap
                     sugg_q, sugg_t = (0, "—")
-                    if buy_price >= 90 and prices[i] is not None and holding_at[i] > 0:
+                    if in_range and prices[i] is not None and holding_at[i] > 0:
                         sugg_q, sugg_t = slot_sell_qty(advisor, buy_price, prev_pattern,
                                                        prices, i, holding_at[i], strategy)
                     r = st.columns([0.7, 1, 1.2, 1])
                     mark = " 🟢" if i == cur_slot else ""
                     r[0].markdown(f"<div style='padding-top:.55rem;font-weight:600'>{AMPM[ap]}{mark}</div>",
                                   unsafe_allow_html=True)
-                    r[1].number_input(f"price_{i}", max_value=999, step=1, placeholder="菜價",
-                                      key=f"p_{i}", label_visibility="collapsed")
+                    r[1].text_input(f"price_{i}", placeholder="菜價",
+                                    key=f"p_{i}", label_visibility="collapsed")
                     if prices[i] is not None and bought_qty:
                         sugg_html = f"建議賣 <b>{fmt(sugg_q)}</b> 顆<br><span class='sub'>{sugg_t}</span>"
                     else:
                         sugg_html = "<span class='sub'>建議賣出</span>"
                     r[2].markdown(f"<div style='padding-top:.4rem' class='sgrid'>{sugg_html}</div>",
                                   unsafe_allow_html=True)
-                    r[3].number_input(f"sold_{i}", step=1, placeholder="實際賣",
-                                      key=f"s_{i}", label_visibility="collapsed")
+                    r[3].text_input(f"sold_{i}", placeholder="實際賣",
+                                    key=f"s_{i}", label_visibility="collapsed")
 
         # row-base 排列: (一,二) / (三,四) / (五,六)
         for rowi in range(3):
@@ -377,7 +408,7 @@ def main():
                     day_box(rowi * 2 + ci)
 
     # ===== 預測: 圖表 + 波型×時間 表 =====
-    if buy_price >= 90:
+    if in_range:
         observed = prices[:cur_slot + 1] if cur_slot is not None else []
         res = advise(advisor, buy_price, prev_pattern, observed=observed, budget=budget, holding=0)
         ptab = pattern_table(buy_price, prev_pattern, observed)
