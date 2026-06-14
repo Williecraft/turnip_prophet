@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from urllib.parse import quote
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -183,9 +184,12 @@ def inject_css():
         ".ptable{width:100%;border-collapse:separate;border-spacing:0 4px;font-size:.82rem;}"
         ".ptable th{color:var(--brown-l);font-weight:700;padding:.25rem .3rem;text-align:center;}"
         ".ptable td{text-align:center;padding:.3rem .25rem;background:#fff;white-space:nowrap;}"
-        ".ptable td.name{text-align:left;font-weight:700;border-radius:9px 0 0 9px;padding-left:.6rem;background:#faf3df;}"
+        ".ptable td.name{padding:.15rem .25rem;background:transparent;width:5.4rem;}"
         ".ptable td.prob{font-weight:700;background:#faf3df;}"
         ".ptable .allrow td{background:#eef6e6;font-weight:600;}"
+        ".patbtn{display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;background:#fff;border:1.5px solid #e3d7b6;border-radius:10px;padding:.35rem .2rem;color:var(--brown);font-weight:700;font-size:.82rem;white-space:nowrap;transition:.12s;}"
+        ".patbtn:hover{border-color:var(--leaf);}"
+        ".patbtn.active{background:var(--leaf);border-color:var(--leaf-d);color:#fff;box-shadow:0 3px 8px var(--shadow);}"
         ".tablescroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}"
         ".tablescroll .ptable{min-width:560px;}"
         # ---- 手機 / 窄螢幕 (<=640px): 頂層欄位改為直向堆疊, 欄內小列維持橫向 ----
@@ -251,31 +255,42 @@ def render_pattern_table(ptab, buy, view="所有波型"):
             out.append(f"<td style='{sty};{extra}{rad}'>{txt}</td>")
         return "".join(out)
 
-    # 依機率由高到低排序; 若選了單一波型則只留該列 (所有波型固定最上方)
-    srows = sorted(ptab["rows"], key=lambda r: -r["prob"])
-    if view != "所有波型":
-        srows = [r for r in srows if r["name"] == view]
+    def btn(name):
+        cls = "patbtn active" if name == view else "patbtn"
+        return f"<a class='{cls}' href='?view={quote(name)}' target='_self'>{name}</a>"
 
+    # 表格永遠顯示全部波型; 依機率由高到低排序, 所有波型固定最上方
+    srows = sorted(ptab["rows"], key=lambda r: -r["prob"])
     rows = ["<div class='tablescroll'>", "".join(h)]
-    rows.append(f"<tr class='allrow'><td class='name'>所有波型</td><td class='prob'>—</td>{cells(ptab['overall'])}</tr>")
+    rows.append(f"<tr class='allrow'><td class='name'>{btn('所有波型')}</td>"
+                f"<td class='prob'>—</td>{cells(ptab['overall'])}</tr>")
     for r in srows:
-        rows.append(f"<tr><td class='name'>{r['name']}</td><td class='prob'>{r['prob']*100:.0f}%</td>{cells(r['cells'])}</tr>")
-    if view != "所有波型" and not srows:
-        rows.append(f"<tr><td class='name'>{view}</td><td class='prob'>0%</td>"
-                    f"<td colspan='12' style='background:#f3eede;color:#9a8f78;border-radius:9px'>"
-                    f"此波型目前已被排除</td></tr>")
+        rows.append(f"<tr><td class='name'>{btn(r['name'])}</td>"
+                    f"<td class='prob'>{r['prob']*100:.0f}%</td>{cells(r['cells'])}</tr>")
     rows.append("</table></div>")
     st.markdown("".join(rows), unsafe_allow_html=True)
 
 
-def render_chart(res, buy):
+def render_chart(res, buy, view="所有波型", ptab=None):
     t = res["table"]
     full = [f"{DAY_ZH[i//2]} {AMPM[i % 2]}" for i in range(N_SLOTS)]
-    smax = [r["smax"] for r in t]
-    q90 = [r["q90"] for r in t]
-    q10 = [r["q10"] for r in t]
-    gmin = [r["gmin"] for r in t]
     obs = [r["obs"] for r in t]
+
+    # 依選擇的波型決定區間: 所有波型用整體 (含最可能帶); 單一波型用該波型 min~max
+    row = None
+    if view != "所有波型" and ptab:
+        row = next((r for r in ptab.get("rows", []) if r["name"] == view), None)
+    if row is not None:
+        gmin = [c[0] for c in row["cells"]]
+        smax = [c[1] for c in row["cells"]]
+        q10 = q90 = None
+        title = view
+    else:
+        smax = [r["smax"] for r in t]
+        q90 = [r["q90"] for r in t]
+        q10 = [r["q10"] for r in t]
+        gmin = [r["gmin"] for r in t]
+        title = "所有波型"
     floor = int(max(gmin)) if gmin else buy   # 保底價格 = 全週最佳保證下限
 
     C_BUY, C_FLOOR = "#8a6d4f", "#2f9c8c"
@@ -291,10 +306,11 @@ def render_chart(res, buy):
     fig.add_trace(go.Scatter(x=full, y=smax, fill="tozeroy", mode="lines", name="最高價格",
                   line=dict(color=C_MAX, width=0), fillcolor="rgba(123,196,103,.5)", zorder=1,
                   hovertemplate="最高價格：%{y:.0f}<extra></extra>"))
-    fig.add_trace(go.Scatter(x=full, y=q90, fill="tozeroy", mode="lines", name="最可能價格",
-                  line=dict(color=C_LIKELY, width=0), fillcolor="rgba(126,170,214,.65)", zorder=2,
-                  customdata=[f"{q10[i]}-{q90[i]}" for i in range(N_SLOTS)],
-                  hovertemplate="最可能價格：%{customdata}<extra></extra>"))
+    if q90 is not None:                       # 「最可能」帶只在「所有波型」顯示
+        fig.add_trace(go.Scatter(x=full, y=q90, fill="tozeroy", mode="lines", name="最可能價格",
+                      line=dict(color=C_LIKELY, width=0), fillcolor="rgba(126,170,214,.65)", zorder=2,
+                      customdata=[f"{q10[i]}-{q90[i]}" for i in range(N_SLOTS)],
+                      hovertemplate="最可能價格：%{customdata}<extra></extra>"))
     fig.add_trace(go.Scatter(x=full, y=gmin, fill="tozeroy", mode="lines", name="最低價格",
                   line=dict(color=C_MIN, width=0), fillcolor="rgba(232,150,180,.7)", zorder=3,
                   hovertemplate="最低價格：%{y:.0f}<extra></extra>"))
@@ -438,16 +454,12 @@ def main():
                         f"<div class='tol'>容錯模式：輸入與官方規則差約 ±{tol} 鈴，"
                         f"已用最接近的波型推估（最相符：{bname}）</div>",
                         unsafe_allow_html=True)
-                render_chart(res, buy_price)
-                # 左側波型選擇按鈕 + 表格 (右)
-                sel, tbl = st.columns([1, 5])
-                with sel:
-                    st.markdown("<div class='sub' style='padding-top:.2rem'>檢視波型</div>",
-                                unsafe_allow_html=True)
-                    view = st.radio("檢視波型", PATTERN_VIEWS, key="pat_view",
-                                    label_visibility="collapsed")
-                with tbl:
-                    render_pattern_table(ptab, buy_price, view)
+                # 由網址參數決定圖表要看哪個波型 (表格內的波型按鈕會設定 ?view=)
+                view = st.query_params.get("view", "所有波型")
+                if view not in PATTERN_VIEWS:
+                    view = "所有波型"
+                render_chart(res, buy_price, view, ptab)
+                render_pattern_table(ptab, buy_price, view)
                 st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填</div>",
                             unsafe_allow_html=True)
 
