@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 for _p in (os.path.join(_ROOT, "webapp"), os.path.join(_ROOT, "core")):
@@ -111,6 +112,15 @@ def clear_data():
 @st.cache_resource(show_spinner=False)
 def load_advisor():
     return get_advisor()
+
+
+@st.cache_data(show_spinner=False)
+def compute_forecast(buy_price, prev_pattern, observed, budget):
+    """算好 (建議 + 波型表); 以輸入為快取鍵 -> 只換波型檢視時不重算、即時切換。"""
+    adv = load_advisor()
+    res = advise(adv, buy_price, prev_pattern, list(observed), budget)
+    ptab = pattern_table(buy_price, prev_pattern, list(observed))
+    return res, ptab
 
 
 def _pint(s):
@@ -258,17 +268,17 @@ def render_pattern_table(ptab, buy, view="所有波型"):
             out.append(f"<td style='{sty};{extra}{rad}'>{txt}</td>")
         return "".join(out)
 
-    def btn(name):
-        cls = "patbtn active" if name == view else "patbtn"
-        return f"<a class='{cls}' href='?view={quote(name)}' target='_self'>{name}</a>"
+    def nm(name):
+        cls = "name act" if name == view else "name"
+        return f"<td class='{cls}'>{name}</td>"
 
-    # 表格永遠顯示全部波型; 依機率由高到低排序, 所有波型固定最上方
+    # 表格永遠顯示全部波型; 依機率由高到低排序, 所有波型固定最上方; 目前檢視的波型高亮
     srows = sorted(ptab["rows"], key=lambda r: -r["prob"])
     rows = ["<div class='tablescroll'>", "".join(h)]
-    rows.append(f"<tr class='allrow'><td class='name'>{btn('所有波型')}</td>"
+    rows.append(f"<tr class='allrow'>{nm('所有波型')}"
                 f"<td class='prob'>—</td>{cells(ptab['overall'])}</tr>")
     for r in srows:
-        rows.append(f"<tr><td class='name'>{btn(r['name'])}</td>"
+        rows.append(f"<tr>{nm(r['name'])}"
                     f"<td class='prob'>{r['prob']*100:.0f}%</td>{cells(r['cells'])}</tr>")
     rows.append("</table></div>")
     st.markdown("".join(rows), unsafe_allow_html=True)
@@ -332,10 +342,14 @@ def render_chart(res, buy, view="所有波型", ptab=None):
                       font=dict(family="Noto Sans TC", color="#5b4636"))
     fig.update_yaxes(rangemode="tozero", gridcolor="rgba(0,0,0,.06)", fixedrange=True)
     fig.update_xaxes(showgrid=False, tickangle=0, tickfont=dict(size=10), fixedrange=True)
-    st.plotly_chart(fig, width="content",       # 用 figure 固定寬 820, 不隨容器伸縮
-                    config={"displayModeBar": False, "scrollZoom": False,
-                            "doubleClick": False, "staticPlot": False,
-                            "responsive": False})   # 關閉自動縮放, 才會真的固定 820
+    # 用自帶 HTML 內嵌 (固定 820 寬), 外層 overflow 滑動 ->
+    # st.plotly_chart 會被 Streamlit 強制隨容器伸縮, 改用 iframe 才能真的固定寬
+    cfg = {"displayModeBar": False, "scrollZoom": False, "doubleClick": False,
+           "responsive": False}
+    chart_html = fig.to_html(include_plotlyjs="cdn", full_html=False, config=cfg)
+    components.html(
+        f"<div style=\"overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%\">"
+        f"{chart_html}</div>", height=375, scrolling=False)
 
 
 # --------------------------------------------------------------------------
@@ -441,8 +455,7 @@ def main():
     # ===== 預測: 圖表 + 波型×時間 表 =====
     if in_range:
         observed = prices[:cur_slot + 1] if cur_slot is not None else []
-        res = advise(advisor, buy_price, prev_pattern, observed=observed, budget=budget, holding=0)
-        ptab = pattern_table(buy_price, prev_pattern, observed)
+        res, ptab = compute_forecast(buy_price, prev_pattern, tuple(observed), budget)
         with st.container(border=True):
             st.markdown("#### 🔮 價格預測")
             if not res["feasible"] or not ptab.get("feasible"):
@@ -459,13 +472,16 @@ def main():
                         f"<div class='tol'>容錯模式：輸入與官方規則差約 ±{tol} 鈴，"
                         f"已用最接近的波型推估（最相符：{bname}）</div>",
                         unsafe_allow_html=True)
-                # 由網址參數決定圖表要看哪個波型 (表格內的波型按鈕會設定 ?view=)
-                view = st.query_params.get("view", "所有波型")
-                if view not in PATTERN_VIEWS:
-                    view = "所有波型"
+                # 波型選擇 (原生按鈕群; 即時切換不重載網頁)。固定順序, 只列目前仍可能的波型
+                feasible = {r["name"] for r in ptab["rows"]}
+                opts = ["所有波型"] + [n for n in PATTERN_VIEWS[1:] if n in feasible]
+                if ss.get("pat_view") not in opts:
+                    ss["pat_view"] = "所有波型"
+                view = st.radio("檢視波型", opts, horizontal=True, key="pat_view",
+                                label_visibility="collapsed")
                 render_chart(res, buy_price, view, ptab)
                 render_pattern_table(ptab, buy_price, view)
-                st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填</div>",
+                st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填　·　點上方按鈕切換圖表波型</div>",
                             unsafe_allow_html=True)
 
     # ===== 清除 =====
