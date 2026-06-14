@@ -45,6 +45,7 @@ AMPM = ["上午", "下午"]
 AMPM_S = ["上", "下"]
 PREV_MAP = dict(PREV_PATTERN_CHOICES)
 PATTERN_VIEWS = ["所有波型", "波動型", "三期型", "四期型", "遞減型"]   # 波型表左側選擇按鈕
+CONTENT_W = 820   # 圖表與表格的共同固定寬 (窄螢幕一起左右滾動)
 
 DEFAULTS = {
     "prev_label": "不知道",
@@ -181,7 +182,7 @@ def inject_css():
         ".big-num{font-family:'Fredoka',sans-serif;font-weight:700;font-size:2rem;color:var(--leaf-d);line-height:1.1;}"
         ".sub{color:var(--brown-l);font-size:.9rem;}"
         ".sgrid{font-size:.85rem;}"
-        ".ptable{width:100%;border-collapse:separate;border-spacing:0 4px;font-size:.82rem;}"
+        ".ptable{width:820px;border-collapse:separate;border-spacing:0 4px;font-size:.82rem;}"  # 同 CONTENT_W
         ".ptable th{color:var(--brown-l);font-weight:700;padding:.25rem .3rem;text-align:center;}"
         ".ptable td{text-align:center;padding:.3rem .25rem;background:#fff;white-space:nowrap;}"
         ".ptable td.name{padding:.15rem .25rem;background:transparent;width:5.4rem;}"
@@ -191,9 +192,7 @@ def inject_css():
         ".patbtn:hover{border-color:var(--leaf);}"
         ".patbtn.active{background:var(--leaf);border-color:var(--leaf-d);color:#fff;box-shadow:0 3px 8px var(--shadow);}"
         ".tablescroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}"
-        ".tablescroll .ptable{min-width:560px;}"
-        # 圖表與表格同寬 (min 560), 窄螢幕一起左右滾動
-        "[data-testid='stPlotlyChart']{min-width:560px;}"
+        # 圖表固定寬 (= 表格 820), 窄螢幕外層容器一起左右滾動
         "[data-testid='stElementContainer']:has([data-testid='stPlotlyChart']){overflow-x:auto;-webkit-overflow-scrolling:touch;}"
         # ---- 手機 / 窄螢幕 (<=640px): 頂層欄位改為直向堆疊, 欄內小列維持橫向 ----
         "@media (max-width:640px){"
@@ -323,7 +322,8 @@ def render_chart(res, buy, view="所有波型", ptab=None):
         fig.add_trace(go.Scatter(x=ox, y=oy, mode="markers", name="你的價格",
                       marker=dict(size=10, color=C_OBS, line=dict(width=1.5, color="#fff")),
                       zorder=20, hovertemplate="你的價格：%{y:.0f}<extra></extra>"))
-    fig.update_layout(height=360, margin=dict(l=8, r=8, t=8, b=8),
+    fig.update_layout(height=360, width=CONTENT_W, autosize=False,
+                      margin=dict(l=8, r=8, t=8, b=8),
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                       legend=dict(orientation="h", y=1.16, x=0),
                       hovermode="x unified", hoverlabel=dict(font=dict(family="Noto Sans TC")),
@@ -331,7 +331,7 @@ def render_chart(res, buy, view="所有波型", ptab=None):
                       font=dict(family="Noto Sans TC", color="#5b4636"))
     fig.update_yaxes(rangemode="tozero", gridcolor="rgba(0,0,0,.06)", fixedrange=True)
     fig.update_xaxes(showgrid=False, tickangle=0, tickfont=dict(size=10), fixedrange=True)
-    st.plotly_chart(fig, width="stretch",
+    st.plotly_chart(fig, width="content",       # 用 figure 固定寬 820, 不隨容器伸縮
                     config={"displayModeBar": False, "scrollZoom": False,
                             "doubleClick": False, "staticPlot": False})
 
