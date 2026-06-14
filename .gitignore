@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+
+# 大型資料集產物 (策略快取 data/policies.pkl 要保留, 故只忽略 parquet/csv)
+data/*.parquet
+data/*.csv
+tmp/*.csv

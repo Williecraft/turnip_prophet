@@ -1,0 +1,11 @@
+# Streamlit 主題: 海島晨光 / Nook 風 (與 streamlit_app.py 的 CSS 一致)
+[theme]
+base = "light"
+primaryColor = "#5fa85f"
+backgroundColor = "#fbf4df"
+secondaryBackgroundColor = "#f3e8c7"
+textColor = "#5b4636"
+font = "sans serif"
+
+[server]
+headless = true

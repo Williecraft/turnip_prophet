@@ -1,0 +1,11 @@
+# core/turnip_sim.py 只用標準函式庫 (no deps), 確保 bit-exact。
+# 其餘 core 模組 (forecaster / policy_dp / backtest / recommend) 需要 numpy。
+# 網頁 UI (streamlit_app.py + webapp/) 需要 streamlit 與 localStorage 元件。
+
+numpy>=1.24                  # 向量化運算 (forecaster / policy_dp / backtest / recommend)
+streamlit>=1.33             # 網頁 UI
+streamlit-local-storage>=0.0.13   # 把輸入記在瀏覽器 (cookie/localStorage), 重開免重填
+
+# 以下僅 generate_dataset.py 輸出 parquet 才需要 (網頁不需):
+pyarrow>=14.0              # parquet 輸出
+pandas>=2.0               # 讀回 / 統計健檢
