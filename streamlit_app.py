@@ -158,14 +158,15 @@ def inject_css():
         "@media (max-width:640px){"
         ".block-container{padding-left:.55rem;padding-right:.55rem;padding-top:1rem;max-width:100%;}"
         ".hero .title{font-size:1.7rem;}"
-        # 頂層欄位(設定/星期日/日列) 直向堆疊
+        # 頂層欄位(設定/星期日/日列) 直向堆疊, 且每欄撐滿整列寬
         "[data-testid='stHorizontalBlock']{flex-direction:column;gap:.4rem;}"
-        # 欄內的時段小列 維持橫向且不換行, 欄位可壓縮
+        "[data-testid='stColumn']{width:100%!important;flex:1 1 100%!important;min-width:0!important;}"
+        # 欄內的時段小列 維持橫向不換行, 內欄平分一列寬
         "[data-testid='stColumn'] [data-testid='stHorizontalBlock']{flex-direction:row;flex-wrap:nowrap;gap:.25rem;}"
-        "[data-testid='stColumn']{min-width:0!important;}"
+        "[data-testid='stColumn'] [data-testid='stColumn']{width:auto!important;flex:1 1 0!important;}"
         ".big-num{font-size:1.6rem;}"
-        ".sgrid{font-size:.78rem;}"
-        ".stNumberInput input{padding:.3rem .45rem!important;}"
+        ".sgrid{font-size:.76rem;}"
+        ".stNumberInput input{padding:.3rem .4rem!important;}"
         "div[role='radiogroup'] label{padding:.4rem .9rem!important;font-size:.95rem;}"
         "}"
         "</style>"
