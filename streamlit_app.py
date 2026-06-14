@@ -156,13 +156,16 @@ def inject_css():
         ".tablescroll .ptable{min-width:560px;}"
         # ---- 手機 / 窄螢幕 (<=640px): 頂層欄位改為直向堆疊, 欄內小列維持橫向 ----
         "@media (max-width:640px){"
-        ".block-container{padding-left:.6rem;padding-right:.6rem;padding-top:1rem;max-width:100%;}"
+        ".block-container{padding-left:.55rem;padding-right:.55rem;padding-top:1rem;max-width:100%;}"
         ".hero .title{font-size:1.7rem;}"
-        "[data-testid='stHorizontalBlock']{flex-direction:column;gap:.45rem;}"
-        "[data-testid='stColumn'] [data-testid='stHorizontalBlock']{flex-direction:row;gap:.3rem;}"
-        "[data-testid='stColumn']{width:100%!important;}"
-        "[data-testid='stColumn'] [data-testid='stColumn']{width:auto!important;}"
+        # 頂層欄位(設定/星期日/日列) 直向堆疊
+        "[data-testid='stHorizontalBlock']{flex-direction:column;gap:.4rem;}"
+        # 欄內的時段小列 維持橫向且不換行, 欄位可壓縮
+        "[data-testid='stColumn'] [data-testid='stHorizontalBlock']{flex-direction:row;flex-wrap:nowrap;gap:.25rem;}"
+        "[data-testid='stColumn']{min-width:0!important;}"
         ".big-num{font-size:1.6rem;}"
+        ".sgrid{font-size:.78rem;}"
+        ".stNumberInput input{padding:.3rem .45rem!important;}"
         "div[role='radiogroup'] label{padding:.4rem .9rem!important;font-size:.95rem;}"
         "}"
         "</style>"
@@ -335,7 +338,7 @@ def main():
                          f"<span class='big-num' style='font-size:1.4rem'>{fmt(max(remaining,0))}</span> 顆</div>",
                          unsafe_allow_html=True)
         def day_box(d):
-            """單日(上午/下午)輸入框。"""
+            """單日(上午/下午)輸入框。欄位用 placeholder 自我標示, 不另設表頭。"""
             with st.container(border=True):
                 st.markdown(f"<div class='daytag'>{DAY_ZH[d]}</div>", unsafe_allow_html=True)
                 for ap in range(2):
@@ -344,26 +347,21 @@ def main():
                     if buy_price >= 90 and prices[i] is not None and holding_at[i] > 0:
                         sugg_q, sugg_t = slot_sell_qty(advisor, buy_price, prev_pattern,
                                                        prices, i, holding_at[i], strategy)
-                    r = st.columns([0.8, 1, 1.1, 1])
+                    r = st.columns([0.7, 1, 1.2, 1])
                     mark = " 🟢" if i == cur_slot else ""
                     r[0].markdown(f"<div style='padding-top:.55rem;font-weight:600'>{AMPM[ap]}{mark}</div>",
                                   unsafe_allow_html=True)
-                    r[1].number_input(f"price_{i}", min_value=0, max_value=999,
+                    r[1].number_input(f"price_{i}", min_value=0, max_value=999, placeholder="菜價",
                                       key=f"p_{i}", label_visibility="collapsed")
-                    sugg_html = (f"<b>{fmt(sugg_q)}</b> 顆" if prices[i] is not None and bought_qty
-                                 else "—")
-                    r[2].markdown(f"<div style='padding-top:.45rem' class='sgrid'>{sugg_html}"
-                                  f"<br><span class='sub'>{sugg_t}</span></div>", unsafe_allow_html=True)
-                    r[3].number_input(f"sold_{i}", min_value=0,
+                    if prices[i] is not None and bought_qty:
+                        sugg_html = f"建議賣 <b>{fmt(sugg_q)}</b> 顆<br><span class='sub'>{sugg_t}</span>"
+                    else:
+                        sugg_html = "<span class='sub'>建議賣出</span>"
+                    r[2].markdown(f"<div style='padding-top:.4rem' class='sgrid'>{sugg_html}</div>",
+                                  unsafe_allow_html=True)
+                    r[3].number_input(f"sold_{i}", min_value=0, placeholder="實際賣",
                                       key=f"s_{i}", label_visibility="collapsed")
 
-        # 欄位表頭 (左右兩欄各一份)
-        hdr = st.columns(2)
-        for c in hdr:
-            hc = c.columns([0.8, 1, 1.1, 1])
-            hc[1].markdown("<div class='colhead'>菜價</div>", unsafe_allow_html=True)
-            hc[2].markdown("<div class='colhead'>建議賣出</div>", unsafe_allow_html=True)
-            hc[3].markdown("<div class='colhead'>實際賣出</div>", unsafe_allow_html=True)
         # row-base 排列: (一,二) / (三,四) / (五,六)
         for rowi in range(3):
             rc = st.columns(2)
