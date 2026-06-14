@@ -192,7 +192,8 @@ def inject_css():
         ".patbtn:hover{border-color:var(--leaf);}"
         ".patbtn.active{background:var(--leaf);border-color:var(--leaf-d);color:#fff;box-shadow:0 3px 8px var(--shadow);}"
         ".tablescroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}"
-        # 圖表固定寬 (= 表格 820), 窄螢幕外層容器一起左右滾動
+        # 圖表固定寬 (= 表格 820), 窄螢幕容器一起左右滾動 (雙保險: 元素本身 + 外層)
+        "[data-testid='stPlotlyChart']{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}"
         "[data-testid='stElementContainer']:has([data-testid='stPlotlyChart']){overflow-x:auto;-webkit-overflow-scrolling:touch;}"
         # ---- 手機 / 窄螢幕 (<=640px): 頂層欄位改為直向堆疊, 欄內小列維持橫向 ----
         "@media (max-width:640px){"
@@ -333,7 +334,8 @@ def render_chart(res, buy, view="所有波型", ptab=None):
     fig.update_xaxes(showgrid=False, tickangle=0, tickfont=dict(size=10), fixedrange=True)
     st.plotly_chart(fig, width="content",       # 用 figure 固定寬 820, 不隨容器伸縮
                     config={"displayModeBar": False, "scrollZoom": False,
-                            "doubleClick": False, "staticPlot": False})
+                            "doubleClick": False, "staticPlot": False,
+                            "responsive": False})   # 關閉自動縮放, 才會真的固定 820
 
 
 # --------------------------------------------------------------------------
