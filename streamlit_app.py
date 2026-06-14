@@ -43,6 +43,7 @@ DAY_SHORT = ["一", "二", "三", "四", "五", "六"]
 AMPM = ["上午", "下午"]
 AMPM_S = ["上", "下"]
 PREV_MAP = dict(PREV_PATTERN_CHOICES)
+PATTERN_VIEWS = ["所有波型", "波動型", "三期型", "四期型", "遞減型"]   # 波型表左側選擇按鈕
 
 DEFAULTS = {
     "prev_label": "不知道",
@@ -230,7 +231,7 @@ def cell_style(cmin, cmax, buy, is_obs):
     return f"background:{bg};color:{fg};font-weight:700", ""
 
 
-def render_pattern_table(ptab, buy):
+def render_pattern_table(ptab, buy, view="所有波型"):
     obs = ptab["obs"]
     h = ["<table class='ptable'><tr><th rowspan='2' style='text-align:left;padding-left:.6rem'>波型</th><th rowspan='2'>機率</th>"]
     for d in DAY_ZH:
@@ -250,10 +251,19 @@ def render_pattern_table(ptab, buy):
             out.append(f"<td style='{sty};{extra}{rad}'>{txt}</td>")
         return "".join(out)
 
+    # 依機率由高到低排序; 若選了單一波型則只留該列 (所有波型固定最上方)
+    srows = sorted(ptab["rows"], key=lambda r: -r["prob"])
+    if view != "所有波型":
+        srows = [r for r in srows if r["name"] == view]
+
     rows = ["<div class='tablescroll'>", "".join(h)]
     rows.append(f"<tr class='allrow'><td class='name'>所有波型</td><td class='prob'>—</td>{cells(ptab['overall'])}</tr>")
-    for r in ptab["rows"]:
+    for r in srows:
         rows.append(f"<tr><td class='name'>{r['name']}</td><td class='prob'>{r['prob']*100:.0f}%</td>{cells(r['cells'])}</tr>")
+    if view != "所有波型" and not srows:
+        rows.append(f"<tr><td class='name'>{view}</td><td class='prob'>0%</td>"
+                    f"<td colspan='12' style='background:#f3eede;color:#9a8f78;border-radius:9px'>"
+                    f"此波型目前已被排除</td></tr>")
     rows.append("</table></div>")
     st.markdown("".join(rows), unsafe_allow_html=True)
 
@@ -429,7 +439,15 @@ def main():
                         f"已用最接近的波型推估（最相符：{bname}）</div>",
                         unsafe_allow_html=True)
                 render_chart(res, buy_price)
-                render_pattern_table(ptab, buy_price)
+                # 左側波型選擇按鈕 + 表格 (右)
+                sel, tbl = st.columns([1, 5])
+                with sel:
+                    st.markdown("<div class='sub' style='padding-top:.2rem'>檢視波型</div>",
+                                unsafe_allow_html=True)
+                    view = st.radio("檢視波型", PATTERN_VIEWS, key="pat_view",
+                                    label_visibility="collapsed")
+                with tbl:
+                    render_pattern_table(ptab, buy_price, view)
                 st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填</div>",
                             unsafe_allow_html=True)
 
