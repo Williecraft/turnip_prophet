@@ -152,6 +152,19 @@ def inject_css():
         ".ptable td.name{text-align:left;font-weight:700;border-radius:9px 0 0 9px;padding-left:.6rem;background:#faf3df;}"
         ".ptable td.prob{font-weight:700;background:#faf3df;}"
         ".ptable .allrow td{background:#eef6e6;font-weight:600;}"
+        ".tablescroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}"
+        ".tablescroll .ptable{min-width:560px;}"
+        # ---- 手機 / 窄螢幕 (<=640px): 頂層欄位改為直向堆疊, 欄內小列維持橫向 ----
+        "@media (max-width:640px){"
+        ".block-container{padding-left:.6rem;padding-right:.6rem;padding-top:1rem;max-width:100%;}"
+        ".hero .title{font-size:1.7rem;}"
+        "[data-testid='stHorizontalBlock']{flex-direction:column;gap:.45rem;}"
+        "[data-testid='stColumn'] [data-testid='stHorizontalBlock']{flex-direction:row;gap:.3rem;}"
+        "[data-testid='stColumn']{width:100%!important;}"
+        "[data-testid='stColumn'] [data-testid='stColumn']{width:auto!important;}"
+        ".big-num{font-size:1.6rem;}"
+        "div[role='radiogroup'] label{padding:.4rem .9rem!important;font-size:.95rem;}"
+        "}"
         "</style>"
     )
     st.markdown(css, unsafe_allow_html=True)
@@ -200,11 +213,11 @@ def render_pattern_table(ptab, buy):
             out.append(f"<td style='{sty};{extra}{rad}'>{txt}</td>")
         return "".join(out)
 
-    rows = ["".join(h)]
+    rows = ["<div class='tablescroll'>", "".join(h)]
     rows.append(f"<tr class='allrow'><td class='name'>所有波型</td><td class='prob'>—</td>{cells(ptab['overall'])}</tr>")
     for r in ptab["rows"]:
         rows.append(f"<tr><td class='name'>{r['name']}</td><td class='prob'>{r['prob']*100:.0f}%</td>{cells(r['cells'])}</tr>")
-    rows.append("</table>")
+    rows.append("</table></div>")
     st.markdown("".join(rows), unsafe_allow_html=True)
 
 
