@@ -265,10 +265,13 @@ def render_chart(res, buy):
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                       legend=dict(orientation="h", y=1.16, x=0),
                       hovermode="x unified", hoverlabel=dict(font=dict(family="Noto Sans TC")),
+                      dragmode=False,                       # 鎖定: 不可拖曳/縮放
                       font=dict(family="Noto Sans TC", color="#5b4636"))
-    fig.update_yaxes(rangemode="tozero", gridcolor="rgba(0,0,0,.06)")
-    fig.update_xaxes(showgrid=False, tickangle=0, tickfont=dict(size=10))
-    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    fig.update_yaxes(rangemode="tozero", gridcolor="rgba(0,0,0,.06)", fixedrange=True)
+    fig.update_xaxes(showgrid=False, tickangle=0, tickfont=dict(size=10), fixedrange=True)
+    st.plotly_chart(fig, width="stretch",
+                    config={"displayModeBar": False, "scrollZoom": False,
+                            "doubleClick": False, "staticPlot": False})
 
 
 # --------------------------------------------------------------------------
