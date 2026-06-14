@@ -7,5 +7,10 @@ secondaryBackgroundColor = "#f3e8c7"
 textColor = "#5b4636"
 font = "sans serif"
 
+[client]
+# 隱藏右上開發者選單 (含「Clear caches」與 R/C 快捷鍵), 給使用者乾淨介面
+toolbarMode = "viewer"
+showErrorDetails = false
+
 [server]
 headless = true

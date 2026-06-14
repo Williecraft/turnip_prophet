@@ -53,6 +53,11 @@ def stationary_distribution() -> np.ndarray:
 
 STATIONARY = stationary_distribution()
 
+# prev_pattern 未知時的先驗: 假設「上週波型均勻」-> 對四列轉移取平均 (= 各 next 欄平均)。
+# 這與社群計算機 (elxris / ac-turnip) 的「第一次」機率一致: 35 / 26.25 / 13.75 / 25。
+# (註: 與 stationary 長期分布略有不同, 但對外輸出統一採此「均勻上週」假設以與參考一致。)
+UNKNOWN_PRIOR = TRANSITION.mean(axis=0)
+
 
 def _intceil(x):
     """官方 intceil 的向量化版 (正價格時等同向上取整)。"""
@@ -91,20 +96,85 @@ def _indep_bounds(base, a, b):
     return int(_intceil(a * base)), int(_intceil(b * base))
 
 
-class SubPattern:
-    __slots__ = ("pattern", "prior", "_sampler", "_bounds")
+def _ic(x):
+    """官方 intceil 的純量版。"""
+    return int(np.floor(float(x) + 0.99999))
 
-    def __init__(self, pattern, prior, sampler, bounds):
+
+class SubPattern:
+    __slots__ = ("pattern", "prior", "_sampler", "_bounds", "base", "runs", "indep")
+
+    def __init__(self, pattern, prior, sampler, bounds, base, runs, indep):
         self.pattern = pattern
         self.prior = prior
         self._sampler = sampler      # fn(base, n, rng) -> (n,12)
-        self._bounds = bounds        # (12,2)
+        self._bounds = bounds        # (12,2) 先驗(未條件化)上下限
+        self.base = base
+        # runs: [(start_slot, length, loStart, hiStart, decFix, decRandMax), ...] 遞減段(倍率鏈)
+        # indep: {slot: (lo_price, hi_price)} 獨立時段(尖峰/高/低), 各自獨立不串接
+        self.runs = runs
+        self.indep = indep
 
     def sample(self, base, n, rng):
         return self._sampler(base, n, rng)
 
     def bounds(self):
         return self._bounds
+
+    # ---- 條件化邊界: 把已觀測價格沿「遞減段倍率鏈」前後傳遞, 收緊未觀測時段 ----
+    def fit(self, obs, obs_idx):
+        """回傳 (cond[12] = [lo,hi] 每時段, violation)。
+        violation = 觀測價格超出條件化可行區間的最大鈴差 (0 = 完全相符)。"""
+        base = self.base
+        cond = [None] * N_SLOTS
+        viol = 0
+        for slot, (lo, hi) in self.indep.items():     # 獨立時段: 固定範圍, 不串接
+            cond[slot] = [lo, hi]
+            o = obs[slot]
+            if o is not None:
+                if o < lo:
+                    viol = max(viol, lo - o)
+                elif o > hi:
+                    viol = max(viol, o - hi)
+        for (start, length, loS, hiS, dFix, dRand) in self.runs:
+            viol = max(viol, self._fit_run(obs, base, start, length, loS, hiS, dFix, dRand, cond))
+        for i in obs_idx:                              # 已觀測格釘成觀測值
+            cond[i] = [int(obs[i]), int(obs[i])]
+        return cond, int(viol)
+
+    def _fit_run(self, obs, base, start, length, loS, hiS, dFix, dRand, cond):
+        """單一遞減段的倍率區間傳遞 (forward 套用觀測 + backward 收緊), 寫入 cond, 回傳 violation。"""
+        dmin, dmax = dFix, dFix + dRand
+        rlo = [0.0] * length
+        rhi = [0.0] * length
+        run_viol = 0
+        for k in range(length):
+            if k == 0:
+                rlo[k], rhi[k] = loS, hiS
+            else:
+                rlo[k] = rlo[k - 1] - dmax
+                rhi[k] = rhi[k - 1] - dmin
+            o = obs[start + k]
+            if o is not None:
+                olo = (o - 0.99999) / base       # intceil 反推: rate*base ∈ [o-0.99999, o+0.00001)
+                ohi = (o + 0.00001) / base
+                if ohi < rlo[k]:                 # 觀測比鏈能到的還低
+                    run_viol = max(run_viol, _ic(rlo[k] * base) - o)
+                    rhi[k] = rlo[k]
+                elif olo > rhi[k]:               # 觀測比鏈能到的還高
+                    run_viol = max(run_viol, o - _ic(rhi[k] * base))
+                    rlo[k] = rhi[k]
+                else:
+                    rlo[k] = max(rlo[k], olo)
+                    rhi[k] = min(rhi[k], ohi)
+        for k in range(length - 2, -1, -1):      # backward: 用後面收緊前面
+            rlo[k] = max(rlo[k], rlo[k + 1] + dmin)
+            rhi[k] = min(rhi[k], rhi[k + 1] + dmax)
+            if rlo[k] > rhi[k]:                  # 數值守門
+                rlo[k] = rhi[k] = (rlo[k] + rhi[k]) / 2
+        for k in range(length):
+            cond[start + k] = [_ic(rlo[k] * base), _ic(rhi[k] * base)]
+        return run_viol
 
 
 # ---- Pattern 2: Decreasing (單一結構) ----
@@ -115,7 +185,8 @@ def _make_p2(base, prior):
         out, _ = _dec_run_forward(base, n, rng, 0.85, 0.90, 0.03, 0.02, 12)
         return out
 
-    return SubPattern(2, prior, sampler, bounds)
+    runs = [(0, 12, 0.85, 0.90, 0.03, 0.02)]
+    return SubPattern(2, prior, sampler, bounds, base, runs, {})
 
 
 # ---- Pattern 1: Large spike, peakStart(work) in 3..9 ----
@@ -126,10 +197,13 @@ def _make_p1(base, prior, peak_start):
     # build bounds
     bounds = np.empty((12, 2), dtype=np.int64)
     bounds[:dec_len] = _dec_run_bounds(base, 0.85, 0.90, 0.03, 0.02, dec_len)
+    indep = {}
     for k, (a, b) in enumerate(spike_factors):
         bounds[dec_len + k] = _indep_bounds(base, a, b)
+        indep[dec_len + k] = tuple(int(x) for x in _indep_bounds(base, a, b))
     for s in range(dec_len + 5, 12):
         bounds[s] = _indep_bounds(base, 0.4, 0.9)
+        indep[s] = tuple(int(x) for x in _indep_bounds(base, 0.4, 0.9))
 
     def sampler(base, n, rng):
         out = np.empty((n, 12), dtype=np.int64)
@@ -141,7 +215,8 @@ def _make_p1(base, prior, peak_start):
             out[:, s] = _intceil(rng.uniform(0.4, 0.9, size=n) * base)
         return out
 
-    return SubPattern(1, prior, sampler, bounds)
+    runs = [(0, dec_len, 0.85, 0.90, 0.03, 0.02)] if dec_len > 0 else []
+    return SubPattern(1, prior, sampler, bounds, base, runs, indep)
 
 
 # ---- Pattern 3: Small spike, peakStart(work) in 2..9 ----
@@ -160,6 +235,12 @@ def _make_p3(base, prior, peak_start):
     rest_from = s0 + 5
     if rest_from < 12:
         bounds[rest_from:] = _dec_run_bounds(base, 0.4, 0.9, 0.03, 0.02, 12 - rest_from)
+    indep = {s0 + k: (int(bounds[s0 + k, 0]), int(bounds[s0 + k, 1])) for k in range(5)}
+    runs = []
+    if dec_len > 0:
+        runs.append((0, dec_len, 0.4, 0.9, 0.03, 0.02))
+    if rest_from < 12:
+        runs.append((rest_from, 12 - rest_from, 0.4, 0.9, 0.03, 0.02))
 
     def sampler(base, n, rng):
         out = np.empty((n, 12), dtype=np.int64)
@@ -177,7 +258,7 @@ def _make_p3(base, prior, peak_start):
             out[:, rest_from:] = dec2
         return out
 
-    return SubPattern(3, prior, sampler, bounds)
+    return SubPattern(3, prior, sampler, bounds, base, runs, indep)
 
 
 # ---- Pattern 0: Fluctuating ----
@@ -198,14 +279,25 @@ def _make_p0(base, prior, dec_len1, hi1, hi3):
     d1b = _dec_run_bounds(base, 0.6, 0.8, 0.04, 0.06, dec_len1)
     d2b = _dec_run_bounds(base, 0.6, 0.8, 0.04, 0.06, dec_len2)
     hib = _indep_bounds(base, 0.9, 1.4)
+    hib_t = (int(hib[0]), int(hib[1]))
+    indep = {}
     di1 = di2 = 0
     for i, s in enumerate(seg):
         if s[0] == "hi":
             bounds[i] = hib
+            indep[i] = hib_t
         elif s[0] == "d1":
             bounds[i] = d1b[di1]; di1 += 1
         else:
             bounds[i] = d2b[di2]; di2 += 1
+    # 兩個遞減段的起始 slot
+    run1_start = hi1
+    run2_start = hi1 + dec_len1 + hi2
+    runs = []
+    if dec_len1 > 0:
+        runs.append((run1_start, dec_len1, 0.6, 0.8, 0.04, 0.06))
+    if dec_len2 > 0:
+        runs.append((run2_start, dec_len2, 0.6, 0.8, 0.04, 0.06))
 
     def sampler(base, n, rng):
         out = np.empty((n, 12), dtype=np.int64)
@@ -221,13 +313,13 @@ def _make_p0(base, prior, dec_len1, hi1, hi3):
                 out[:, i] = d2[:, di2]; di2 += 1
         return out
 
-    return SubPattern(0, prior, sampler, bounds)
+    return SubPattern(0, prior, sampler, bounds, base, runs, indep)
 
 
 def enumerate_subpatterns(base, prev_pattern):
     """列舉所有子波型並給先驗權重 (含上週波型轉移 x 結構均勻)。"""
     if prev_pattern is None:
-        pat_prior = STATIONARY
+        pat_prior = UNKNOWN_PRIOR        # 上週未知: 均勻上週 -> 轉移列平均 (對齊參考站)
     else:
         pat_prior = TRANSITION[prev_pattern]
 
@@ -278,10 +370,42 @@ def _weighted_quantile(values, weights, q):
     return np.interp(q, cw, v)
 
 
-def forecast(buy_price, observed, prev_pattern=None, n_samples=4000, seed=0):
+def _select_feasible(subs, obs, obs_idx, auto_tolerance=False, band=5, soft_scale=3.0):
+    """挑出符合觀測的子波型。
+    回傳 (feas, tol)。feas = [(sp, prior, ll, cond), ...]; ll 為容錯懲罰項(完全相符時=0),
+    cond = 條件化後每時段 [lo,hi] (已把觀測沿倍率鏈前後傳遞收緊)。
+
+    機率模型對齊社群標準 (elxris / ac-turnip): 權重 = 先驗(轉移×結構均勻) × 可行性指示,
+    不乘「每時段 1/區間寬」的似然 (那會壓低區間較寬的波型, 與所有計算機不一致)。
+      - 若有完全相符 (條件化後可行) 的子波型 -> 回傳那些, tol=0。
+      - 否則 auto_tolerance=True 時 (容錯/軟性): 保留「違規量在最小值 +band 內」的子波型,
+        並把違規量當懲罰 (-違規/soft_scale) 折進權重 -> 越接近權重越大, 不會硬翻盤。
+        auto_tolerance=False 時回傳 ([], 所需最小 tol) 代表矛盾。
+    違規量 = 觀測價超出「條件化可行區間」的最大鈴差 (沿倍率鏈傳遞後)。
+    """
+    cand = []
+    for sp in subs:
+        cond, v = sp.fit(obs, obs_idx)
+        cand.append((sp, sp.prior, 0.0, v, cond))   # ll=0: 純先驗權重 (見上)
+
+    if not cand:
+        return [], 0
+    min_v = min(c[3] for c in cand)
+    if min_v == 0:
+        return [(sp, pr, ll, cd) for (sp, pr, ll, v, cd) in cand if v == 0], 0
+    if not auto_tolerance:
+        return [], int(min_v)        # 矛盾; 回報「需要多少容錯才裝得下」
+    feas = [(sp, pr, ll - v / soft_scale, cd)
+            for (sp, pr, ll, v, cd) in cand if v <= min_v + band]
+    return feas, int(min_v)
+
+
+def forecast(buy_price, observed, prev_pattern=None, n_samples=4000, seed=0,
+             auto_tolerance=False):
     """主入口。
     observed: 長度<=12 的序列, 每元素為已觀測整數價格或 None(未知); 缺尾自動補 None。
-    回傳 dict (見模組說明)。
+    auto_tolerance: 觀測與規則矛盾時, 改取「最接近」的子波型 (容錯模式)。
+    回傳 dict (見模組說明); 多含 tolerance_used (容錯所用的最大偏差鈴, 0=完全相符)。
     """
     base = int(buy_price)
     obs = list(observed) + [None] * (N_SLOTS - len(observed))
@@ -291,41 +415,39 @@ def forecast(buy_price, observed, prev_pattern=None, n_samples=4000, seed=0):
     rng = np.random.default_rng(seed)
     subs = enumerate_subpatterns(base, prev_pattern)
 
-    feas = []
-    for sp in subs:
-        b = sp.bounds()
-        ok = True
-        loglik = 0.0
-        for i in obs_idx:
-            lo, hi = int(b[i, 0]), int(b[i, 1])
-            if not (lo <= obs[i] <= hi):
-                ok = False
-                break
-            loglik += -np.log(hi - lo + 1)   # 離散均勻 likelihood 1/區間寬
-        if ok:
-            feas.append((sp, sp.prior, loglik))
+    feas, tol_used = _select_feasible(subs, obs, obs_idx, auto_tolerance)
 
     if not feas:
         # 觀測與任何官方子波型矛盾 (輸入錯誤或首週特例) -> 回傳空信念旗標
         return {"feasible": False, "buy_price": base, "observed": obs,
+                "tolerance_needed": tol_used,
                 "pattern_posterior": {k: 0.0 for k in range(4)}}
 
-    # 後驗權重 = prior * likelihood
-    max_ll = max(t[2] for t in feas)
-    weights = np.array([prior * np.exp(ll - max_ll) for (_, prior, ll) in feas])
+    # 後驗權重 (對齊社群計算機 elxris / ac-turnip):
+    # 每個『仍有可行子波型的波型』拿到完整先驗 (轉移列), 在存活波型間正規化;
+    # 不依存活子波型數量比例縮放 (= 機率只看波型是否還可能, 不看剩幾種結構)。
+    pat_prior = UNKNOWN_PRIOR if prev_pattern is None else TRANSITION[prev_pattern]
+    surviving = sorted(set(sp.pattern for (sp, _, _, _) in feas))
+    pat_w = {p: float(pat_prior[p]) for p in surviving}
+    pat_tot = sum(pat_w.values()) or 1.0
+    sub_tot = {p: sum(pr for (sp, pr, _, _) in feas if sp.pattern == p) or 1.0
+               for p in surviving}
+    weights = np.array([
+        (pat_w[sp.pattern] / pat_tot) * (pr / sub_tot[sp.pattern])   # 波型機率 × 結構內占比
+        for (sp, pr, _, _) in feas])
     weights = weights / weights.sum()
 
-    # forward 取樣彙整
+    # forward 取樣彙整; 邊界用『條件化』cond (已沿倍率鏈傳遞觀測, 較緊)
     all_samples = []
     all_w = []
     pat_post = np.zeros(4)
     guaranteed_min = np.full(N_SLOTS, np.inf)
     slot_max = np.full(N_SLOTS, -np.inf)
-    for (sp, _, _), w in zip(feas, weights):
+    for (sp, _, _, cond), w in zip(feas, weights):
         pat_post[sp.pattern] += w
-        b = sp.bounds()
-        guaranteed_min = np.minimum(guaranteed_min, b[:, 0])
-        slot_max = np.maximum(slot_max, b[:, 1])
+        cb = np.array(cond, dtype=np.int64)              # (12,2) 條件化邊界
+        guaranteed_min = np.minimum(guaranteed_min, cb[:, 0])
+        slot_max = np.maximum(slot_max, cb[:, 1])
         s = sp.sample(base, n_samples, rng)
         all_samples.append(s)
         all_w.append(np.full(n_samples, w / n_samples))
@@ -342,6 +464,11 @@ def forecast(buy_price, observed, prev_pattern=None, n_samples=4000, seed=0):
     q10 = np.array([_weighted_quantile(samples[:, i], sw, 0.10) for i in range(N_SLOTS)])
     q50 = np.array([_weighted_quantile(samples[:, i], sw, 0.50) for i in range(N_SLOTS)])
     q90 = np.array([_weighted_quantile(samples[:, i], sw, 0.90) for i in range(N_SLOTS)])
+    # forward 取樣未條件化未來遞減段, 可能超出條件化邊界 -> clamp 回 [gmin, smax] 保持一致
+    for i in range(N_SLOTS):
+        q10[i] = min(max(q10[i], guaranteed_min[i]), slot_max[i])
+        q50[i] = min(max(q50[i], guaranteed_min[i]), slot_max[i])
+        q90[i] = min(max(q90[i], guaranteed_min[i]), slot_max[i])
 
     # 剩餘最高價分布 (未觀測時段的 max); 若全部觀測完則為 0 長度
     future_idx = [i for i in range(N_SLOTS) if obs[i] is None]
@@ -355,6 +482,7 @@ def forecast(buy_price, observed, prev_pattern=None, n_samples=4000, seed=0):
         "buy_price": base,
         "prev_pattern": prev_pattern,
         "observed": obs,
+        "tolerance_used": int(tol_used),
         "n_feasible_subpatterns": len(feas),
         "pattern_posterior": {k: float(pat_post[k]) for k in range(4)},
         "guaranteed_min": guaranteed_min.astype(int),   # 每時段保證至少會看到的下限

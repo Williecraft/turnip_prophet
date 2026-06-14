@@ -15,6 +15,7 @@ webapp/advisor_api.py — 網頁 UI 的薄包裝層 (前端唯一會呼叫的後
 
 from __future__ import annotations
 
+import math
 import os
 import pickle
 import sys
@@ -25,7 +26,7 @@ _CORE = os.path.join(_ROOT, "core")
 if _CORE not in sys.path:
     sys.path.insert(0, _CORE)
 
-from forecaster import PATTERN_NAMES, DAY_LABELS, N_SLOTS  # noqa: E402
+from forecaster import PATTERN_NAMES, DAY_LABELS, N_SLOTS, forecast  # noqa: E402
 from policy_dp import train_policy  # noqa: E402
 from recommend import Advisor  # noqa: E402
 
@@ -34,20 +35,24 @@ BUY_PRICE_RANGE = range(90, 111)          # 官方週日買價 90~110 (閉區間
 PREV_PATTERNS = (None, 0, 1, 2, 3)        # None = 上週波型不知道
 QTY_STEP = 10                             # 顆數必為 10 的倍數
 
-# 網頁只呈現 3 種策略 (保守→積極): CVaR → Kelly → Max-Profit; 不顯示 winrate。
-STRATEGIES = ("cvar", "kelly", "max_profit")
+# 4 種策略 (保守→積極): 保本勝率 → 穩健保守 → Kelly 成長 → 全力衝刺。
+STRATEGIES = ("winrate", "cvar", "kelly", "max_profit")
 STRATEGY_INFO = {
-    "cvar":       {"label": "穩健保守", "desc": "最保守：壓低最慘 5% 的虧損，下注最小、求穩。"},
-    "kelly":      {"label": "Kelly 成長", "desc": "中間：長期複利成長最佳的下注比例，攻守均衡。"},
-    "max_profit": {"label": "全力衝刺", "desc": "最積極：期望獲利最大，傾向全押、單週波動也最大。"},
+    "winrate":    {"label": "保本勝率", "desc": "最保守：一有獲利就賣出，盡量場場不賠"},
+    "cvar":       {"label": "穩健保守", "desc": "保守：壓低最慘 5% 的虧損，下注較小"},
+    "kelly":      {"label": "Kelly 成長", "desc": "均衡：長期複利成長最佳的下注比例"},
+    "max_profit": {"label": "全力衝刺", "desc": "積極：追求期望獲利最大，傾向全押"},
 }
 
-# 上週波型按鈕 → 後端 prev_pattern 代碼。(三期=大爆衝/large_spike=1, 四期=小爆衝/small_spike=3)
+# 波型代碼 → 中文 (統一用 三期型/四期型, 不用大爆衝/小爆衝)。
+PATTERN_ZH = {0: "波動型", 1: "三期型", 2: "遞減型", 3: "四期型"}
+
+# 上週波型按鈕 → 後端 prev_pattern 代碼。(三期=large_spike=1, 四期=small_spike=3)
 PREV_PATTERN_CHOICES = (
     ("不知道", None),
-    ("波型 (波動)", 0),
-    ("四期型 (小爆衝)", 3),
-    ("三期型 (大爆衝)", 1),
+    ("波動型", 0),
+    ("四期型", 3),
+    ("三期型", 1),
     ("遞減型", 2),
 )
 
@@ -110,24 +115,25 @@ def advise(advisor, buy_price, prev_pattern, observed, budget, holding=0):
     """
     buy_price = int(buy_price)
     observed = list(observed)
-    adv = advisor.advise(buy_price, prev_pattern=prev_pattern,
-                         observed=observed, capital=budget)
-    fc = adv["forecast"]
+    cur_slot = (len(observed) - 1) if observed else None
+    # 容錯模式: 與規則矛盾時改取最接近的子波型 (tolerance_used = 容錯偏差鈴)
+    fc = forecast(buy_price, observed, prev_pattern=prev_pattern, auto_tolerance=True)
 
     out = {
         "buy_price": buy_price,
         "prev_pattern": prev_pattern,
         "feasible": fc.get("feasible", False),
+        "tolerance_used": int(fc.get("tolerance_used", 0) or 0),
         "pattern_posterior": {},
         "table": [],
         "remaining_max": None,
         "buy": {},
         "sell": None,
-        "current_slot": adv["current_slot"],
+        "current_slot": cur_slot,
     }
 
     if not fc.get("feasible", False):
-        out["error"] = "輸入的價格與官方規則矛盾，請檢查是否輸入錯誤。"
+        out["error"] = "輸入的價格與官方規則矛盾，請檢查是否輸入錯誤"
         return out
 
     # 波型後驗機率 (中文名)
@@ -155,9 +161,12 @@ def advise(advisor, buy_price, prev_pattern, observed, budget, holding=0):
         "q50": int(round(fc["remaining_max_q50"])),
     }
 
+    pol = advisor.policy(buy_price, prev_pattern)
+
     # ---- 週日買入建議: 資金比例 → 顆數 (捨去到 10) ----
+    buyrec = pol.recommend_buy(capital=budget, base_qty=advisor.base_qty)
     for s in STRATEGIES:
-        b = adv["buy"][s]
+        b = buyrec[s]
         f = b["capital_fraction"]
         spend_budget = budget * f
         qty = round_down_10(spend_budget // buy_price) if f > 0 else 0
@@ -171,13 +180,13 @@ def advise(advisor, buy_price, prev_pattern, observed, budget, holding=0):
         }
 
     # ---- 本期賣出建議: 比例 × 目前持有 → 顆數 (捨去到 10; 全賣=賣光) ----
-    if adv["sell"] is not None:
-        slot = adv["current_slot"]
-        cur_p = fc["observed"][slot]
+    if cur_slot is not None:
+        cur_p = fc["observed"][cur_slot]
         cur_price = int(cur_p) if cur_p is not None else 0
-        sell = {"slot": slot, "price": cur_price}
+        sdec = pol.decide_sell(_fill_forward(observed, buy_price), cur_slot)
+        sell = {"slot": cur_slot, "price": cur_price}
         for s in STRATEGIES:
-            frac = adv["sell"][s]
+            frac = sdec[s]
             if frac >= 0.999:
                 qty = int(holding)              # 全賣 (holding 已是 10 倍數)
                 act = "全部賣出"
@@ -206,6 +215,62 @@ def slot_sell_qty(advisor, buy_price, prev_pattern, prices, slot, holding, strat
     if frac <= 1e-6:
         return 0, "不賣 (續抱)"
     return round_down_10(holding * frac), f"賣出 {frac*100:.0f}%"
+
+
+def pattern_table(buy_price, prev_pattern, observed, auto_tolerance=True):
+    """ac-turnip 風格表格資料: 每個波型 (列) × 12 時段 (欄) 的價格區間 + 後驗機率。
+    用解析邊界 (不取樣, 便宜)。auto_tolerance=True 時, 與規則矛盾改取最接近波型。回傳:
+      {feasible, rows:[{pattern,name,prob,cells}], overall, obs,
+       tolerance_used, violations:[{slot,obs,lo,hi,diff}]}
+    rows 依 波動型→三期型→遞減型→四期型, 只含目前仍可行 (機率>0) 的波型。
+    """
+    from forecaster import enumerate_subpatterns, _select_feasible, N_SLOTS as _NS
+
+    base = int(buy_price)
+    obs = list(observed) + [None] * (_NS - len(observed))
+    obs = obs[:_NS]
+    obs_idx = [i for i, v in enumerate(obs) if v is not None]
+
+    from forecaster import UNKNOWN_PRIOR, TRANSITION
+
+    subs = enumerate_subpatterns(base, prev_pattern)
+    feas, tol_used = _select_feasible(subs, obs, obs_idx, auto_tolerance)
+
+    if not feas:
+        return {"feasible": False, "tolerance_needed": tol_used}
+
+    # 機率對齊社群計算機: 每個存活波型拿完整先驗, 在存活波型間正規化 (見 forecaster.forecast)
+    pat_prior = UNKNOWN_PRIOR if prev_pattern is None else TRANSITION[prev_pattern]
+    surviving = sorted(set(sp.pattern for (sp, _, _, _) in feas))
+    pat_tot = sum(float(pat_prior[p]) for p in surviving) or 1.0
+
+    INF = float("inf")
+    overall_min = [INF] * _NS
+    overall_max = [-INF] * _NS
+    rows = []
+    for pat in (0, 1, 2, 3):
+        idxs = [k for k, (sp, _, _, _) in enumerate(feas) if sp.pattern == pat]
+        if not idxs:
+            continue
+        prob = float(pat_prior[pat]) / pat_tot
+        if prob < 0.005:        # 機率趨近 0 的波型不列出
+            continue
+        cmin = [INF] * _NS
+        cmax = [-INF] * _NS
+        for k in idxs:
+            cond = feas[k][3]                    # 條件化邊界 (已沿倍率鏈傳遞觀測, 已釘觀測格)
+            for i in range(_NS):
+                cmin[i] = min(cmin[i], cond[i][0])
+                cmax[i] = max(cmax[i], cond[i][1])
+        for i in range(_NS):
+            overall_min[i] = min(overall_min[i], cmin[i])
+            overall_max[i] = max(overall_max[i], cmax[i])
+        rows.append({"pattern": pat, "name": PATTERN_ZH[pat], "prob": prob,
+                     "cells": list(zip(cmin, cmax))})
+
+    overall = list(zip(overall_min, overall_max))
+    return {"feasible": True, "rows": rows, "overall": overall, "obs": obs,
+            "tolerance_used": int(tol_used), "violations": []}
 
 
 # --------------------------------------------------------------------------

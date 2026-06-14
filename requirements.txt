@@ -4,6 +4,7 @@
 
 numpy>=1.24                  # 向量化運算 (forecaster / policy_dp / backtest / recommend)
 streamlit>=1.33             # 網頁 UI
+plotly>=5.18               # 價格區間圖表
 streamlit-local-storage>=0.0.13   # 把輸入記在瀏覽器 (cookie/localStorage), 重開免重填
 
 # 以下僅 generate_dataset.py 輸出 parquet 才需要 (網頁不需):
