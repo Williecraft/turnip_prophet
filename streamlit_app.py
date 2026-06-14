@@ -192,6 +192,9 @@ def inject_css():
         ".patbtn.active{background:var(--leaf);border-color:var(--leaf-d);color:#fff;box-shadow:0 3px 8px var(--shadow);}"
         ".tablescroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}"
         ".tablescroll .ptable{min-width:560px;}"
+        # 圖表與表格同寬 (min 560), 窄螢幕一起左右滾動
+        "[data-testid='stPlotlyChart']{min-width:560px;}"
+        "[data-testid='stElementContainer']:has([data-testid='stPlotlyChart']){overflow-x:auto;-webkit-overflow-scrolling:touch;}"
         # ---- 手機 / 窄螢幕 (<=640px): 頂層欄位改為直向堆疊, 欄內小列維持橫向 ----
         "@media (max-width:640px){"
         ".block-container{padding-left:.55rem;padding-right:.55rem;padding-top:1rem;max-width:100%;}"
