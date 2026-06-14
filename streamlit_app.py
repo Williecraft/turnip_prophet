@@ -302,10 +302,10 @@ def main():
     with st.container(border=True):
         st.markdown("#### ☀️ 星期日 · 買入")
         c1, c2, c3, c4 = st.columns([1, 1, 1.1, 1])
-        c1.number_input("預算（鈴錢）", min_value=0, key="budget")
-        c2.number_input("買入價格", min_value=0, max_value=110, key="buy_price")
+        c1.number_input("預算（鈴錢）", min_value=0, step=1, key="budget")
+        c2.number_input("買入價格", max_value=110, step=1, key="buy_price")  # 不設 min 才能清空
         budget = int(ss["budget"] or 0)
-        buy_price = int(ss["buy_price"] or 0)
+        buy_price = int(ss["buy_price"]) if ss["buy_price"] and int(ss["buy_price"]) > 0 else 0
         if buy_price and buy_price < 90:
             st.markdown("<div class='warn'>買價通常是 90~110</div>", unsafe_allow_html=True)
         if buy_price >= 90:
@@ -314,21 +314,24 @@ def main():
             c3.markdown(f"<div class='sub'>建議買入</div><div class='big-num'>{fmt(b['qty'])} 顆</div>"
                         f"<div class='sub'>約 {fmt(b['bells'])} 鈴 · {b['tag']}</div>",
                         unsafe_allow_html=True)
-            c4.number_input("實際買入顆數", min_value=0, key="bought_qty")
+            c4.number_input("實際買入顆數", step=1, key="bought_qty")
         else:
             c3.markdown("<div class='hint'>輸入買價後顯示建議</div>", unsafe_allow_html=True)
 
-    buy_price = int(ss["buy_price"] or 0)
-    bought_qty = round_down_10(ss["bought_qty"] or 0)
+    buy_price = int(ss["buy_price"]) if ss["buy_price"] and int(ss["buy_price"]) > 0 else 0
+    bought_qty = (round_down_10(ss["bought_qty"])
+                  if ss["bought_qty"] and int(ss["bought_qty"]) > 0 else 0)
 
     # 讀週間價格 + 算每格持有量 (未填 = None, 由其他價格推估補上)
-    prices = [(int(ss[f"p_{i}"]) if ss[f"p_{i}"] else None) for i in range(N_SLOTS)]
+    prices = [(int(ss[f"p_{i}"]) if ss[f"p_{i}"] and int(ss[f"p_{i}"]) > 0 else None)
+              for i in range(N_SLOTS)]
     known = [i for i, v in enumerate(prices) if v is not None]
     cur_slot = max(known) if known else None
     holding_at, h = [0] * N_SLOTS, bought_qty
     for i in range(N_SLOTS):
         holding_at[i] = h
-        h -= min(round_down_10(ss[f"s_{i}"] or 0), h)
+        sold_i = round_down_10(ss[f"s_{i}"]) if ss[f"s_{i}"] and int(ss[f"s_{i}"]) > 0 else 0
+        h -= min(sold_i, h)
     remaining = h
 
     # ===== 週間: 賣出 (雙欄, 週一~三 / 週四~六) =====
@@ -352,7 +355,7 @@ def main():
                     mark = " 🟢" if i == cur_slot else ""
                     r[0].markdown(f"<div style='padding-top:.55rem;font-weight:600'>{AMPM[ap]}{mark}</div>",
                                   unsafe_allow_html=True)
-                    r[1].number_input(f"price_{i}", min_value=0, max_value=999, placeholder="菜價",
+                    r[1].number_input(f"price_{i}", max_value=999, step=1, placeholder="菜價",
                                       key=f"p_{i}", label_visibility="collapsed")
                     if prices[i] is not None and bought_qty:
                         sugg_html = f"建議賣 <b>{fmt(sugg_q)}</b> 顆<br><span class='sub'>{sugg_t}</span>"
@@ -360,7 +363,7 @@ def main():
                         sugg_html = "<span class='sub'>建議賣出</span>"
                     r[2].markdown(f"<div style='padding-top:.4rem' class='sgrid'>{sugg_html}</div>",
                                   unsafe_allow_html=True)
-                    r[3].number_input(f"sold_{i}", min_value=0, placeholder="實際賣",
+                    r[3].number_input(f"sold_{i}", step=1, placeholder="實際賣",
                                       key=f"s_{i}", label_visibility="collapsed")
 
         # row-base 排列: (一,二) / (三,四) / (五,六)
