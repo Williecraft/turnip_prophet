@@ -198,10 +198,11 @@ def inject_css():
         ".big-num{font-family:'Fredoka',sans-serif;font-weight:700;font-size:2rem;color:var(--leaf-d);line-height:1.1;}"
         ".sub{color:var(--brown-l);font-size:.9rem;}"
         ".sgrid{font-size:.85rem;}"
-        ".ptable{width:820px;border-collapse:separate;border-spacing:0 4px;font-size:.82rem;}"  # 同 CONTENT_W
-        ".ptable th{color:var(--brown-l);font-weight:700;padding:.25rem .3rem;text-align:center;}"
-        ".ptable td{text-align:center;padding:.3rem .25rem;background:#fff;white-space:nowrap;}"
-        ".ptable td.name{padding:.15rem .25rem;background:transparent;width:5.4rem;}"
+        f".ptable{{width:{CONTENT_W}px;border-collapse:separate;border-spacing:0 3px;font-size:.7rem;}}"  # 同圖表 CONTENT_W
+        ".ptable th{color:var(--brown-l);font-weight:700;padding:.2rem .15rem;text-align:center;}"
+        ".ptable td{text-align:center;padding:.25rem .15rem;background:#fff;white-space:nowrap;}"
+        ".ptable td.name{padding:.12rem .15rem;background:transparent;width:4.2rem;font-weight:700;}"
+        ".ptable td.name.act{color:var(--leaf-d);text-decoration:underline;}"
         ".ptable td.prob{font-weight:700;background:#faf3df;}"
         ".ptable .allrow td{background:#eef6e6;font-weight:600;}"
         ".patbtn{display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;background:#fff;border:1.5px solid #e3d7b6;border-radius:10px;padding:.35rem .2rem;color:var(--brown);font-weight:700;font-size:.82rem;white-space:nowrap;transition:.12s;}"
