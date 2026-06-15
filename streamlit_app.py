@@ -466,12 +466,8 @@ def main():
             else:
                 tol = ptab.get("tolerance_used", 0)
                 if tol > 0:
-                    best = max(ptab["rows"], key=lambda r: r["prob"]) if ptab["rows"] else None
-                    bname = best["name"] if best else "—"
-                    st.markdown(
-                        f"<div class='tol'>容錯模式：輸入與官方規則差約 ±{tol} 鈴，"
-                        f"已用最接近的波型推估（最相符：{bname}）</div>",
-                        unsafe_allow_html=True)
+                    st.markdown(f"<div class='tol'>容錯模式：輸入與官方規則差約 ±{tol} 鈴</div>",
+                                unsafe_allow_html=True)
                 # 波型選擇 (原生按鈕群; 即時切換不重載網頁)。固定順序, 只列目前仍可能的波型
                 feasible = {r["name"] for r in ptab["rows"]}
                 opts = ["所有波型"] + [n for n in PATTERN_VIEWS[1:] if n in feasible]
