@@ -488,8 +488,6 @@ def main():
                 band = bands.get(view) or bands.get("所有波型")
                 render_chart(res, buy_price, view, ptab, band, pct_label)
                 render_pattern_table(ptab, buy_price, view)
-                st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填</div>",
-                            unsafe_allow_html=True)
                 st.markdown("<div class='sub' style='margin-top:.3rem'>最可能價格涵蓋</div>",
                             unsafe_allow_html=True)
                 st.radio("最可能價格涵蓋", ["50%", "70%", "90%"], index=2, horizontal=True,
