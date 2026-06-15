@@ -46,7 +46,10 @@ AMPM = ["上午", "下午"]
 AMPM_S = ["上", "下"]
 PREV_MAP = dict(PREV_PATTERN_CHOICES)
 PATTERN_VIEWS = ["所有波型", "波動型", "三期型", "四期型", "遞減型"]   # 波型表左側選擇按鈕
-CONTENT_W = 620   # 圖表固定寬 (x 軸標籤斜 45 度, 可較窄; 表格仍 820)
+# 圖表/表格寬度: 桌機填滿容器、超寬螢幕置中(上限), 窄螢幕不低於下限(改左右滾動)
+# -> clamp(下限, 100%, 上限); 縮放有底線, 字不會擠在一起
+W_MIN, W_MAX = 700, 1100
+CONTENT_W = f"clamp({W_MIN}px, 100%, {W_MAX}px)"
 
 DEFAULTS = {
     "prev_label": "不知道",
@@ -198,10 +201,10 @@ def inject_css():
         ".big-num{font-family:'Fredoka',sans-serif;font-weight:700;font-size:2rem;color:var(--leaf-d);line-height:1.1;}"
         ".sub{color:var(--brown-l);font-size:.9rem;}"
         ".sgrid{font-size:.85rem;}"
-        f".ptable{{width:{CONTENT_W}px;border-collapse:separate;border-spacing:0 3px;font-size:.7rem;}}"  # 同圖表 CONTENT_W
-        ".ptable th{color:var(--brown-l);font-weight:700;padding:.2rem .15rem;text-align:center;}"
-        ".ptable td{text-align:center;padding:.25rem .15rem;background:#fff;white-space:nowrap;}"
-        ".ptable td.name{padding:.12rem .15rem;background:transparent;width:4.2rem;font-weight:700;}"
+        f".ptable{{width:{CONTENT_W};border-collapse:separate;border-spacing:0 3px;font-size:.8rem;}}"  # 同圖表寬 (clamp)
+        ".ptable th{color:var(--brown-l);font-weight:700;padding:.25rem .2rem;text-align:center;}"
+        ".ptable td{text-align:center;padding:.3rem .2rem;background:#fff;white-space:nowrap;}"
+        ".ptable td.name{padding:.15rem .2rem;background:transparent;width:4.6rem;font-weight:700;}"
         ".ptable td.name.act{color:var(--leaf-d);text-decoration:underline;}"
         ".ptable td.prob{font-weight:700;background:#faf3df;}"
         ".ptable .allrow td{background:#eef6e6;font-weight:600;}"
@@ -339,7 +342,7 @@ def render_chart(res, buy, view="所有波型", ptab=None, band=None, pct_label=
                       line=dict(color=C_OBS, width=2),
                       marker=dict(size=9, color=C_OBS, line=dict(width=1.5, color="#fff")),
                       zorder=20, hovertemplate="你的價格：%{y:.0f}<extra></extra>"))
-    fig.update_layout(height=400, width=CONTENT_W, autosize=False,
+    fig.update_layout(height=400, autosize=True,
                       margin=dict(l=48, r=24, t=14, b=64),   # 下方留多一點給斜 45 度標籤
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                       legend=dict(orientation="h", y=1.16, x=0),
@@ -348,14 +351,15 @@ def render_chart(res, buy, view="所有波型", ptab=None, band=None, pct_label=
                       font=dict(family="Noto Sans TC", color="#5b4636"))
     fig.update_yaxes(rangemode="tozero", gridcolor="rgba(0,0,0,.06)", fixedrange=True)
     fig.update_xaxes(showgrid=False, tickangle=-45, tickfont=dict(size=10), fixedrange=True)
-    # 用自帶 HTML 內嵌 (固定 CONTENT_W 寬), 外層 overflow 滑動 ->
-    # st.plotly_chart 會被 Streamlit 強制隨容器伸縮, 改用 iframe 才能真的固定寬
+    # iframe 內嵌: 圖填滿 clamp 寬度 (桌機填滿容器/超寬置中, 窄螢幕不低於下限 -> 左右滾動)
     cfg = {"displayModeBar": False, "scrollZoom": False, "doubleClick": False,
-           "responsive": False}
-    chart_html = fig.to_html(include_plotlyjs="cdn", full_html=False, config=cfg)
+           "responsive": True}
+    chart_html = fig.to_html(include_plotlyjs="cdn", full_html=False, config=cfg,
+                             default_width="100%", default_height="400px")
     components.html(
-        f"<div style=\"overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%\">"
-        f"{chart_html}</div>", height=420, scrolling=False)
+        f"<div style=\"width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch\">"
+        f"<div style=\"width:{CONTENT_W};margin:0 auto\">{chart_html}</div></div>",
+        height=430, scrolling=False)
 
 
 # --------------------------------------------------------------------------
