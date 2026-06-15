@@ -334,7 +334,7 @@ def render_chart(res, buy, view="所有波型", ptab=None):
                       marker=dict(size=10, color=C_OBS, line=dict(width=1.5, color="#fff")),
                       zorder=20, hovertemplate="你的價格：%{y:.0f}<extra></extra>"))
     fig.update_layout(height=380, width=CONTENT_W, autosize=False,
-                      margin=dict(l=48, r=18, t=14, b=46),   # 留邊給 y/x 軸標籤, 不被切到
+                      margin=dict(l=48, r=40, t=14, b=46),   # 留邊給 y/x 軸標籤, 不被切到 (右側留給最後一格標籤)
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                       legend=dict(orientation="h", y=1.16, x=0),
                       hovermode="x unified", hoverlabel=dict(font=dict(family="Noto Sans TC")),
