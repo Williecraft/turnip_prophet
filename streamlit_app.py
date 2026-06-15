@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 for _p in (os.path.join(_ROOT, "webapp"), os.path.join(_ROOT, "core")):
@@ -350,16 +351,16 @@ def render_chart(res, buy, view="所有波型", ptab=None, band=None, pct_label=
                       font=dict(family="Noto Sans TC", color="#5b4636"))
     fig.update_yaxes(rangemode="tozero", gridcolor="rgba(0,0,0,.06)", fixedrange=True)
     fig.update_xaxes(showgrid=False, tickangle=-45, tickfont=dict(size=10), fixedrange=True)
-    # 內嵌 (st.html 取代已淘汰的 components.html): 圖填滿 clamp 寬度
-    # (桌機填滿容器/超寬置中, 窄螢幕不低於下限 -> 左右滾動)
+    # 內嵌 iframe: 圖填滿 clamp 寬度 (桌機填滿容器/超寬置中, 窄螢幕不低於下限 -> 左右滾動)。
+    # 註: 改用 st.html 內嵌會被剝掉外部 Plotly cdn 腳本 -> 圖空白, 故仍用 components.html。
     cfg = {"displayModeBar": False, "scrollZoom": False, "doubleClick": False,
            "responsive": True}
     chart_html = fig.to_html(include_plotlyjs="cdn", full_html=False, config=cfg,
                              default_width="100%", default_height="400px")
-    st.html(
+    components.html(
         f"<div style=\"width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch\">"
         f"<div style=\"width:{CONTENT_W};margin:0 auto\">{chart_html}</div></div>",
-        unsafe_allow_javascript=True)
+        height=430, scrolling=False)
 
 
 # --------------------------------------------------------------------------
