@@ -25,7 +25,7 @@ for _p in (os.path.join(_ROOT, "webapp"), os.path.join(_ROOT, "core")):
         sys.path.insert(0, _p)
 
 from advisor_api import (  # noqa: E402
-    advise, get_advisor, slot_sell_qty, pattern_table, round_down_10,
+    advise, get_advisor, slot_sell_qty, pattern_table, pattern_bands, round_down_10,
     STRATEGIES, STRATEGY_INFO, PREV_PATTERN_CHOICES,
 )
 
@@ -46,7 +46,7 @@ AMPM = ["上午", "下午"]
 AMPM_S = ["上", "下"]
 PREV_MAP = dict(PREV_PATTERN_CHOICES)
 PATTERN_VIEWS = ["所有波型", "波動型", "三期型", "四期型", "遞減型"]   # 波型表左側選擇按鈕
-CONTENT_W = 820   # 圖表與表格的共同固定寬 (窄螢幕一起左右滾動)
+CONTENT_W = 620   # 圖表固定寬 (x 軸標籤斜 45 度, 可較窄; 表格仍 820)
 
 DEFAULTS = {
     "prev_label": "不知道",
@@ -121,6 +121,12 @@ def compute_forecast(buy_price, prev_pattern, observed, budget):
     res = advise(adv, buy_price, prev_pattern, list(observed), budget)
     ptab = pattern_table(buy_price, prev_pattern, list(observed))
     return res, ptab
+
+
+@st.cache_data(show_spinner=False)
+def compute_bands(buy_price, prev_pattern, observed, pct):
+    """各波型『最可能價格』中央區間 (涵蓋 pct); 以輸入+pct 為快取鍵, 切換檢視即時。"""
+    return pattern_bands(buy_price, prev_pattern, list(observed), pct)
 
 
 def _pint(s):
@@ -284,26 +290,24 @@ def render_pattern_table(ptab, buy, view="所有波型"):
     st.markdown("".join(rows), unsafe_allow_html=True)
 
 
-def render_chart(res, buy, view="所有波型", ptab=None):
+def render_chart(res, buy, view="所有波型", ptab=None, band=None, pct_label="90%"):
     t = res["table"]
     full = [f"{DAY_ZH[i//2]} {AMPM[i % 2]}" for i in range(N_SLOTS)]
     obs = [r["obs"] for r in t]
 
-    # 依選擇的波型決定區間: 所有波型用整體 (含最可能帶); 單一波型用該波型 min~max
+    # 依選擇的波型決定最高/最低: 所有波型用整體; 單一波型用該波型 min~max
     row = None
     if view != "所有波型" and ptab:
         row = next((r for r in ptab.get("rows", []) if r["name"] == view), None)
     if row is not None:
         gmin = [c[0] for c in row["cells"]]
         smax = [c[1] for c in row["cells"]]
-        q10 = q90 = None
-        title = view
     else:
         smax = [r["smax"] for r in t]
-        q90 = [r["q90"] for r in t]
-        q10 = [r["q10"] for r in t]
         gmin = [r["gmin"] for r in t]
-        title = "所有波型"
+    # 最可能價格帶 (取樣分位數); band 缺時退回 min/max
+    blo = band["lo"] if band else gmin
+    bhi = band["hi"] if band else smax
     floor = int(max(gmin)) if gmin else buy   # 保底價格 = 全週最佳保證下限
 
     C_BUY, C_FLOOR = "#8a6d4f", "#2f9c8c"
@@ -319,37 +323,38 @@ def render_chart(res, buy, view="所有波型", ptab=None):
     fig.add_trace(go.Scatter(x=full, y=smax, fill="tozeroy", mode="lines", name="最高價格",
                   line=dict(color=C_MAX, width=0), fillcolor="rgba(123,196,103,.5)", zorder=1,
                   hovertemplate="最高價格：%{y:.0f}<extra></extra>"))
-    if q90 is not None:                       # 「最可能」帶只在「所有波型」顯示
-        fig.add_trace(go.Scatter(x=full, y=q90, fill="tozeroy", mode="lines", name="最可能價格",
-                      line=dict(color=C_LIKELY, width=0), fillcolor="rgba(126,170,214,.65)", zorder=2,
-                      customdata=[f"{q10[i]}-{q90[i]}" for i in range(N_SLOTS)],
-                      hovertemplate="最可能價格：%{customdata}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=full, y=bhi, fill="tozeroy", mode="lines",
+                  name=f"最可能價格({pct_label})",
+                  line=dict(color=C_LIKELY, width=0), fillcolor="rgba(126,170,214,.65)", zorder=2,
+                  customdata=[f"{blo[i]}-{bhi[i]}" for i in range(N_SLOTS)],
+                  hovertemplate="最可能價格：%{customdata}<extra></extra>"))
     fig.add_trace(go.Scatter(x=full, y=gmin, fill="tozeroy", mode="lines", name="最低價格",
                   line=dict(color=C_MIN, width=0), fillcolor="rgba(232,150,180,.7)", zorder=3,
                   hovertemplate="最低價格：%{y:.0f}<extra></extra>"))
     ox = [full[i] for i in range(N_SLOTS) if obs[i] is not None]
     oy = [obs[i] for i in range(N_SLOTS) if obs[i] is not None]
     if ox:
-        fig.add_trace(go.Scatter(x=ox, y=oy, mode="markers", name="你的價格",
-                      marker=dict(size=10, color=C_OBS, line=dict(width=1.5, color="#fff")),
+        fig.add_trace(go.Scatter(x=ox, y=oy, mode="lines+markers", name="你的價格",
+                      line=dict(color=C_OBS, width=2),
+                      marker=dict(size=9, color=C_OBS, line=dict(width=1.5, color="#fff")),
                       zorder=20, hovertemplate="你的價格：%{y:.0f}<extra></extra>"))
-    fig.update_layout(height=380, width=CONTENT_W, autosize=False,
-                      margin=dict(l=48, r=40, t=14, b=46),   # 留邊給 y/x 軸標籤, 不被切到 (右側留給最後一格標籤)
+    fig.update_layout(height=400, width=CONTENT_W, autosize=False,
+                      margin=dict(l=48, r=24, t=14, b=64),   # 下方留多一點給斜 45 度標籤
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                       legend=dict(orientation="h", y=1.16, x=0),
                       hovermode="x unified", hoverlabel=dict(font=dict(family="Noto Sans TC")),
                       dragmode=False,                       # 鎖定: 不可拖曳/縮放
                       font=dict(family="Noto Sans TC", color="#5b4636"))
     fig.update_yaxes(rangemode="tozero", gridcolor="rgba(0,0,0,.06)", fixedrange=True)
-    fig.update_xaxes(showgrid=False, tickangle=0, tickfont=dict(size=10), fixedrange=True)
-    # 用自帶 HTML 內嵌 (固定 820 寬), 外層 overflow 滑動 ->
+    fig.update_xaxes(showgrid=False, tickangle=-45, tickfont=dict(size=10), fixedrange=True)
+    # 用自帶 HTML 內嵌 (固定 CONTENT_W 寬), 外層 overflow 滑動 ->
     # st.plotly_chart 會被 Streamlit 強制隨容器伸縮, 改用 iframe 才能真的固定寬
     cfg = {"displayModeBar": False, "scrollZoom": False, "doubleClick": False,
            "responsive": False}
     chart_html = fig.to_html(include_plotlyjs="cdn", full_html=False, config=cfg)
     components.html(
         f"<div style=\"overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%\">"
-        f"{chart_html}</div>", height=400, scrolling=False)
+        f"{chart_html}</div>", height=420, scrolling=False)
 
 
 # --------------------------------------------------------------------------
@@ -475,10 +480,20 @@ def main():
                     ss["pat_view"] = "所有波型"
                 view = st.radio("檢視波型", opts, horizontal=True, key="pat_view",
                                 label_visibility="collapsed")
-                render_chart(res, buy_price, view, ptab)
+                # 最可能價格涵蓋範圍 (選擇器在下方, 先讀上次選擇驅動圖表)
+                pct_label = ss.get("band_pct", "90%")
+                pct = {"50%": 0.5, "70%": 0.7, "90%": 0.9}[pct_label]
+                bands = compute_bands(buy_price, prev_pattern, tuple(observed), pct)
+                band = bands.get(view) or bands.get("所有波型")
+                render_chart(res, buy_price, view, ptab, band, pct_label)
                 render_pattern_table(ptab, buy_price, view)
                 st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填</div>",
                             unsafe_allow_html=True)
+                bc1, bc2 = st.columns([1.2, 3])
+                bc1.markdown("<div class='sub' style='padding-top:.5rem'>最可能價格涵蓋</div>",
+                             unsafe_allow_html=True)
+                bc2.radio("最可能價格涵蓋", ["50%", "70%", "90%"], index=2, horizontal=True,
+                          key="band_pct", label_visibility="collapsed")
 
     # ===== 清除 =====
     cL, cR = st.columns([5, 1])

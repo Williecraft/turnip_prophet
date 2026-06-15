@@ -20,6 +20,8 @@ import os
 import pickle
 import sys
 
+import numpy as np
+
 # --- 讓 core/ 的扁平模組可被 import (turnip_sim/forecaster/policy_dp/recommend) ---
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CORE = os.path.join(_ROOT, "core")
@@ -272,6 +274,44 @@ def pattern_table(buy_price, prev_pattern, observed, auto_tolerance=True):
     overall = list(zip(overall_min, overall_max))
     return {"feasible": True, "rows": rows, "overall": overall, "obs": obs,
             "tolerance_used": int(tol_used), "violations": []}
+
+
+def pattern_bands(buy_price, prev_pattern, observed, pct=0.9, n=3000, seed=0):
+    """每個波型 (含『所有波型』) 的『最可能價格』中央區間 (涵蓋 pct 機率) per slot。
+    用子波型取樣 (依先驗×似然加權), 回傳 {名稱: {lo:[12], hi:[12]}}。
+    pct=0.5/0.7/0.9 -> 取中央 [ (1-pct)/2 , 1-(1-pct)/2 ] 分位數。"""
+    from forecaster import (enumerate_subpatterns, _select_feasible,
+                            _weighted_quantile, N_SLOTS as _NS)
+    base = int(buy_price)
+    obs = list(observed) + [None] * (_NS - len(observed))
+    obs = obs[:_NS]
+    obs_idx = [i for i, v in enumerate(obs) if v is not None]
+    feas, _ = _select_feasible(enumerate_subpatterns(base, prev_pattern),
+                              obs, obs_idx, auto_tolerance=True)
+    if not feas:
+        return {}
+    rng = np.random.default_rng(seed)
+    mx = max(t[2] for t in feas)
+    sampled = [(sp, sp.prior * math.exp(ll - mx), sp.sample(base, n, rng))
+               for (sp, _, ll, _) in feas]
+    qlo, qhi = (1 - pct) / 2, 1 - (1 - pct) / 2
+
+    def band(items):
+        tot = sum(w for _, w, _ in items) or 1.0
+        S = np.concatenate([s for _, _, s in items], axis=0).astype(float)
+        W = np.concatenate([np.full(n, w / tot / n) for _, w, _ in items])
+        for i in obs_idx:
+            S[:, i] = obs[i]
+        lo = [int(round(_weighted_quantile(S[:, i], W, qlo))) for i in range(_NS)]
+        hi = [int(round(_weighted_quantile(S[:, i], W, qhi))) for i in range(_NS)]
+        return {"lo": lo, "hi": hi}
+
+    out = {"所有波型": band(sampled)}
+    for pat in (0, 1, 2, 3):
+        items = [t for t in sampled if t[0].pattern == pat]
+        if items:
+            out[PATTERN_ZH[pat]] = band(items)
+    return out
 
 
 # --------------------------------------------------------------------------
