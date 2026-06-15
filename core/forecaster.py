@@ -123,11 +123,14 @@ class SubPattern:
 
     # ---- 條件化邊界: 把已觀測價格沿「遞減段倍率鏈」前後傳遞, 收緊未觀測時段 ----
     def fit(self, obs, obs_idx):
-        """回傳 (cond[12] = [lo,hi] 每時段, violation)。
-        violation = 觀測價格超出條件化可行區間的最大鈴差 (0 = 完全相符)。"""
+        """回傳 (cond[12]=[lo,hi], violation, loglik)。
+        violation = 觀測價超出條件化可行區間的最大鈴差 (0=完全相符)。
+        loglik = Σ 各觀測格『條件化似然』的 log (= -log(該格在已知前文下的預測區間寬));
+                 對齊 mikebryant: 機率 ∝ 先驗 × 似然 (窄區間落點較罕見 -> 似然較高)。"""
         base = self.base
         cond = [None] * N_SLOTS
         viol = 0
+        loglik = 0.0
         for slot, (lo, hi) in self.indep.items():     # 獨立時段: 固定範圍, 不串接
             cond[slot] = [lo, hi]
             o = obs[slot]
@@ -136,18 +139,23 @@ class SubPattern:
                     viol = max(viol, lo - o)
                 elif o > hi:
                     viol = max(viol, o - hi)
+                loglik += -np.log(max(1, hi - lo + 1))
         for (start, length, loS, hiS, dFix, dRand) in self.runs:
-            viol = max(viol, self._fit_run(obs, base, start, length, loS, hiS, dFix, dRand, cond))
+            v, ll = self._fit_run(obs, base, start, length, loS, hiS, dFix, dRand, cond)
+            viol = max(viol, v)
+            loglik += ll
         for i in obs_idx:                              # 已觀測格釘成觀測值
             cond[i] = [int(obs[i]), int(obs[i])]
-        return cond, int(viol)
+        return cond, int(viol), loglik
 
     def _fit_run(self, obs, base, start, length, loS, hiS, dFix, dRand, cond):
-        """單一遞減段的倍率區間傳遞 (forward 套用觀測 + backward 收緊), 寫入 cond, 回傳 violation。"""
+        """單一遞減段的倍率區間傳遞 (forward 套用觀測 + backward 收緊)。
+        回傳 (violation, loglik); loglik 用『套用觀測前』的預測區間寬計算條件化似然。"""
         dmin, dmax = dFix, dFix + dRand
         rlo = [0.0] * length
         rhi = [0.0] * length
         run_viol = 0
+        run_loglik = 0.0
         for k in range(length):
             if k == 0:
                 rlo[k], rhi[k] = loS, hiS
@@ -156,6 +164,9 @@ class SubPattern:
                 rhi[k] = rhi[k - 1] - dmin
             o = obs[start + k]
             if o is not None:
+                # 似然: 套用此觀測前, 該格的預測價格區間寬 (越窄 -> 落點越罕見 -> 似然越高)
+                pw = _ic(rhi[k] * base) - _ic(rlo[k] * base) + 1
+                run_loglik += -np.log(max(1, pw))
                 olo = (o - 0.99999) / base       # intceil 反推: rate*base ∈ [o-0.99999, o+0.00001)
                 ohi = (o + 0.00001) / base
                 if ohi < rlo[k]:                 # 觀測比鏈能到的還低
@@ -174,7 +185,7 @@ class SubPattern:
                 rlo[k] = rhi[k] = (rlo[k] + rhi[k]) / 2
         for k in range(length):
             cond[start + k] = [_ic(rlo[k] * base), _ic(rhi[k] * base)]
-        return run_viol
+        return run_viol, run_loglik
 
 
 # ---- Pattern 2: Decreasing (單一結構) ----
@@ -385,8 +396,8 @@ def _select_feasible(subs, obs, obs_idx, auto_tolerance=False, band=5, soft_scal
     """
     cand = []
     for sp in subs:
-        cond, v = sp.fit(obs, obs_idx)
-        cand.append((sp, sp.prior, 0.0, v, cond))   # ll=0: 純先驗權重 (見上)
+        cond, v, loglik = sp.fit(obs, obs_idx)
+        cand.append((sp, sp.prior, loglik, v, cond))   # 權重 = prior * exp(loglik) (先驗×似然)
 
     if not cand:
         return [], 0
@@ -423,18 +434,11 @@ def forecast(buy_price, observed, prev_pattern=None, n_samples=4000, seed=0,
                 "tolerance_needed": tol_used,
                 "pattern_posterior": {k: 0.0 for k in range(4)}}
 
-    # 後驗權重 (對齊社群計算機 elxris / ac-turnip):
-    # 每個『仍有可行子波型的波型』拿到完整先驗 (轉移列), 在存活波型間正規化;
-    # 不依存活子波型數量比例縮放 (= 機率只看波型是否還可能, 不看剩幾種結構)。
-    pat_prior = UNKNOWN_PRIOR if prev_pattern is None else TRANSITION[prev_pattern]
-    surviving = sorted(set(sp.pattern for (sp, _, _, _) in feas))
-    pat_w = {p: float(pat_prior[p]) for p in surviving}
-    pat_tot = sum(pat_w.values()) or 1.0
-    sub_tot = {p: sum(pr for (sp, pr, _, _) in feas if sp.pattern == p) or 1.0
-               for p in surviving}
-    weights = np.array([
-        (pat_w[sp.pattern] / pat_tot) * (pr / sub_tot[sp.pattern])   # 波型機率 × 結構內占比
-        for (sp, pr, _, _) in feas])
+    # 後驗權重 (對齊 mikebryant 標準計算機): 權重 = 子波型先驗 (= 波型轉移先驗 × 結構均勻),
+    # 在所有『仍可行的子波型』間正規化。等價於 波型機率 ∝ 先驗 × (該波型可行設定占比) —
+    # 故波型若大部分結構被觀測排除, 機率會按比例下降 (非只看是否還可能)。
+    max_ll = max(t[2] for t in feas)
+    weights = np.array([prior * np.exp(ll - max_ll) for (_, prior, ll, _) in feas])
     weights = weights / weights.sum()
 
     # forward 取樣彙整; 邊界用『條件化』cond (已沿倍率鏈傳遞觀測, 較緊)

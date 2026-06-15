@@ -239,10 +239,11 @@ def pattern_table(buy_price, prev_pattern, observed, auto_tolerance=True):
     if not feas:
         return {"feasible": False, "tolerance_needed": tol_used}
 
-    # 機率對齊社群計算機: 每個存活波型拿完整先驗, 在存活波型間正規化 (見 forecaster.forecast)
-    pat_prior = UNKNOWN_PRIOR if prev_pattern is None else TRANSITION[prev_pattern]
-    surviving = sorted(set(sp.pattern for (sp, _, _, _) in feas))
-    pat_tot = sum(float(pat_prior[p]) for p in surviving) or 1.0
+    # 機率對齊 mikebryant: 權重 = 子波型先驗 (波型轉移 × 結構均勻), 在所有可行子波型間正規化
+    # -> 波型機率 ∝ 先驗 × 可行設定占比 (大部分結構被排除的波型, 機率按比例下降)
+    ws = [pr * math.exp(ll - max(t[2] for t in feas)) for (_, pr, ll, _) in feas]
+    tot = sum(ws) or 1.0
+    ws = [w / tot for w in ws]
 
     INF = float("inf")
     overall_min = [INF] * _NS
@@ -252,7 +253,7 @@ def pattern_table(buy_price, prev_pattern, observed, auto_tolerance=True):
         idxs = [k for k, (sp, _, _, _) in enumerate(feas) if sp.pattern == pat]
         if not idxs:
             continue
-        prob = float(pat_prior[pat]) / pat_tot
+        prob = sum(ws[k] for k in idxs)
         if prob < 0.005:        # 機率趨近 0 的波型不列出
             continue
         cmin = [INF] * _NS
