@@ -333,8 +333,8 @@ def render_chart(res, buy, view="所有波型", ptab=None):
         fig.add_trace(go.Scatter(x=ox, y=oy, mode="markers", name="你的價格",
                       marker=dict(size=10, color=C_OBS, line=dict(width=1.5, color="#fff")),
                       zorder=20, hovertemplate="你的價格：%{y:.0f}<extra></extra>"))
-    fig.update_layout(height=360, width=CONTENT_W, autosize=False,
-                      margin=dict(l=8, r=8, t=8, b=8),
+    fig.update_layout(height=380, width=CONTENT_W, autosize=False,
+                      margin=dict(l=48, r=18, t=14, b=46),   # 留邊給 y/x 軸標籤, 不被切到
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                       legend=dict(orientation="h", y=1.16, x=0),
                       hovermode="x unified", hoverlabel=dict(font=dict(family="Noto Sans TC")),
@@ -349,7 +349,7 @@ def render_chart(res, buy, view="所有波型", ptab=None):
     chart_html = fig.to_html(include_plotlyjs="cdn", full_html=False, config=cfg)
     components.html(
         f"<div style=\"overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%\">"
-        f"{chart_html}</div>", height=375, scrolling=False)
+        f"{chart_html}</div>", height=400, scrolling=False)
 
 
 # --------------------------------------------------------------------------
