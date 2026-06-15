@@ -490,11 +490,10 @@ def main():
                 render_pattern_table(ptab, buy_price, view)
                 st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填</div>",
                             unsafe_allow_html=True)
-                bc1, bc2 = st.columns([1.2, 3])
-                bc1.markdown("<div class='sub' style='padding-top:.5rem'>最可能價格涵蓋</div>",
-                             unsafe_allow_html=True)
-                bc2.radio("最可能價格涵蓋", ["50%", "70%", "90%"], index=2, horizontal=True,
-                          key="band_pct", label_visibility="collapsed")
+                st.markdown("<div class='sub' style='margin-top:.3rem'>最可能價格涵蓋</div>",
+                            unsafe_allow_html=True)
+                st.radio("最可能價格涵蓋", ["50%", "70%", "90%"], index=2, horizontal=True,
+                         key="band_pct", label_visibility="collapsed")
 
     # ===== 清除 =====
     cL, cR = st.columns([5, 1])
