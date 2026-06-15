@@ -279,7 +279,7 @@ def render_pattern_table(ptab, buy, view="所有波型"):
                 f"<td class='prob'>—</td>{cells(ptab['overall'])}</tr>")
     for r in srows:
         rows.append(f"<tr>{nm(r['name'])}"
-                    f"<td class='prob'>{r['prob']*100:.0f}%</td>{cells(r['cells'])}</tr>")
+                    f"<td class='prob'>{r['prob']*100:.2f}%</td>{cells(r['cells'])}</tr>")
     rows.append("</table></div>")
     st.markdown("".join(rows), unsafe_allow_html=True)
 
