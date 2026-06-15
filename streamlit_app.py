@@ -477,7 +477,7 @@ def main():
                                 label_visibility="collapsed")
                 render_chart(res, buy_price, view, ptab)
                 render_pattern_table(ptab, buy_price, view)
-                st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填　·　點上方按鈕切換圖表波型</div>",
+                st.markdown("<div class='sub'>顏色：🟩 高　🟦 中　🟥 賠　⬜ 已填</div>",
                             unsafe_allow_html=True)
 
     # ===== 清除 =====
