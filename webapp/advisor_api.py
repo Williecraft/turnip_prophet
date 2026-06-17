@@ -185,7 +185,9 @@ def advise(advisor, buy_price, prev_pattern, observed, budget, holding=0):
     if cur_slot is not None:
         cur_p = fc["observed"][cur_slot]
         cur_price = int(cur_p) if cur_p is not None else 0
-        sdec = pol.decide_sell(_fill_forward(observed, buy_price), cur_slot)
+        # 續抱價值用 forecaster 的條件化剩餘最高價期望 (知道尖峰還沒到), 不用粗略回歸
+        cont = fc.get("remaining_max_mean")
+        sdec = pol.decide_sell(_fill_forward(observed, buy_price), cur_slot, cont=cont)
         sell = {"slot": cur_slot, "price": cur_price}
         for s in STRATEGIES:
             frac = sdec[s]
@@ -205,13 +207,16 @@ def advise(advisor, buy_price, prev_pattern, observed, budget, holding=0):
 
 
 def slot_sell_qty(advisor, buy_price, prev_pattern, prices, slot, holding, strategy):
-    """單一 slot 的建議賣出顆數 (直接用 policy.decide_sell, 不跑取樣 forecast, 便宜)。
+    """單一 slot 的建議賣出顆數。續抱價值用 forecaster 的條件化剩餘最高價期望 (準, 知道尖峰)。
     回傳 (顆數, 文字說明)。holding 為該 slot 當下的持有顆數 (10 倍數)。"""
     if prices[slot] is None or holding <= 0:
         return 0, "—"
     pol = advisor.policy(int(buy_price), prev_pattern)
+    obs_prefix = [p for p in prices[:slot + 1]]
+    fc = forecast(int(buy_price), obs_prefix, prev_pattern=prev_pattern, auto_tolerance=True)
+    cont = fc.get("remaining_max_mean") if fc.get("feasible") else None
     filled = _fill_forward(prices[:slot + 1], int(buy_price))
-    frac = pol.decide_sell(filled, slot)[strategy]
+    frac = pol.decide_sell(filled, slot, cont=cont)[strategy]
     if frac >= 0.999:
         return int(holding), "全部賣出"
     if frac <= 1e-6:

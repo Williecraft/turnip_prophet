@@ -447,10 +447,10 @@ def main():
                                   unsafe_allow_html=True)
                     r[1].text_input(f"price_{i}", placeholder="菜價",
                                     key=f"p_{i}", label_visibility="collapsed")
-                    if prices[i] is not None and bought_qty:
-                        sugg_html = f"建議賣 <b>{fmt(sugg_q)}</b> 顆<br><span class='sub'>{sugg_t}</span>"
+                    if prices[i] is not None and bought_qty and holding_at[i] > 0:
+                        sugg_html = "不賣" if sugg_q == 0 else f"賣出 <b>{fmt(sugg_q)}</b> 顆"
                     else:
-                        sugg_html = "<span class='sub'>建議賣出</span>"
+                        sugg_html = "<span class='sub'>建議</span>"
                     r[2].markdown(f"<div style='padding-top:.4rem' class='sgrid'>{sugg_html}</div>",
                                   unsafe_allow_html=True)
                     r[3].text_input(f"sold_{i}", placeholder="實際賣",

@@ -99,11 +99,15 @@ class Policy:
         self.stats = stats                        # dict objective -> 每單位報酬統計
 
     # ---- 賣出決策: 回傳「現在賣出佔『剩餘持有』的比例」每目標 (全賣=1.0/全抱=0.0) ----
-    def decide_sell(self, observed_prices, t):
+    def decide_sell(self, observed_prices, t, cont=None):
+        """cont: 續抱價值 (= 之後仍能拿到的期望最佳價)。預設用 ev 回歸; 但回歸只看
+        (現價, 至今最高) 兩個特徵, 無法分辨『暴跌後剛起跳=爆衝前兆』, 會在尖峰前過早賣出。
+        故 runtime 由 forecaster 的『條件化剩餘最高價期望』傳入更準的 cont。"""
         price = observed_prices[t]
         base = self.base
         last = (t == N_SLOTS - 1)
-        cont = _ev_continuation(observed_prices, base, t, self.ev_coeffs)
+        if cont is None:
+            cont = _ev_continuation(observed_prices, base, t, self.ev_coeffs)
         out = {}
         out["max_profit"] = 1.0 if (last or price >= cont) else 0.0
         out["kelly"] = out["max_profit"]   # 賣出規則同 max_profit (EV 停止)
