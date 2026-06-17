@@ -185,9 +185,10 @@ def advise(advisor, buy_price, prev_pattern, observed, budget, holding=0):
     if cur_slot is not None:
         cur_p = fc["observed"][cur_slot]
         cur_price = int(cur_p) if cur_p is not None else 0
-        # 續抱價值用 forecaster 的條件化剩餘最高價期望 (知道尖峰還沒到), 不用粗略回歸
-        cont = fc.get("remaining_max_mean")
-        sdec = pol.decide_sell(_fill_forward(observed, buy_price), cur_slot, cont=cont)
+        # 續抱價值用 forecaster 的條件化剩餘最高價分布 (知道尖峰還沒到), 不用粗略回歸
+        sdec = pol.decide_sell(_fill_forward(observed, buy_price), cur_slot,
+                              cont=fc.get("remaining_max_mean"),
+                              cont_lo=fc.get("remaining_max_q10"))
         sell = {"slot": cur_slot, "price": cur_price}
         for s in STRATEGIES:
             frac = sdec[s]
@@ -214,9 +215,11 @@ def slot_sell_qty(advisor, buy_price, prev_pattern, prices, slot, holding, strat
     pol = advisor.policy(int(buy_price), prev_pattern)
     obs_prefix = [p for p in prices[:slot + 1]]
     fc = forecast(int(buy_price), obs_prefix, prev_pattern=prev_pattern, auto_tolerance=True)
-    cont = fc.get("remaining_max_mean") if fc.get("feasible") else None
+    feasible = fc.get("feasible")
+    cont = fc.get("remaining_max_mean") if feasible else None
+    cont_lo = fc.get("remaining_max_q10") if feasible else None
     filled = _fill_forward(prices[:slot + 1], int(buy_price))
-    frac = pol.decide_sell(filled, slot, cont=cont)[strategy]
+    frac = pol.decide_sell(filled, slot, cont=cont, cont_lo=cont_lo)[strategy]
     if frac >= 0.999:
         return int(holding), "全部賣出"
     if frac <= 1e-6:

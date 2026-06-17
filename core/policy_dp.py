@@ -99,10 +99,11 @@ class Policy:
         self.stats = stats                        # dict objective -> 每單位報酬統計
 
     # ---- 賣出決策: 回傳「現在賣出佔『剩餘持有』的比例」每目標 (全賣=1.0/全抱=0.0) ----
-    def decide_sell(self, observed_prices, t, cont=None):
-        """cont: 續抱價值 (= 之後仍能拿到的期望最佳價)。預設用 ev 回歸; 但回歸只看
-        (現價, 至今最高) 兩個特徵, 無法分辨『暴跌後剛起跳=爆衝前兆』, 會在尖峰前過早賣出。
-        故 runtime 由 forecaster 的『條件化剩餘最高價期望』傳入更準的 cont。"""
+    def decide_sell(self, observed_prices, t, cont=None, cont_lo=None):
+        """cont: 續抱價值 (= 之後仍能拿到的期望最佳價); cont_lo: 保守續抱價 (剩餘最高價 q10,
+        『很可能至少拿得到』的下限)。預設用 ev 回歸; 但回歸只看 (現價, 至今最高) 兩特徵,
+        無法分辨『暴跌後剛起跳=爆衝前兆』, 會在尖峰前過早賣出 -> runtime 由 forecaster
+        的條件化分布傳入更準的 cont / cont_lo。"""
         price = observed_prices[t]
         base = self.base
         last = (t == N_SLOTS - 1)
@@ -111,7 +112,13 @@ class Policy:
         out = {}
         out["max_profit"] = 1.0 if (last or price >= cont) else 0.0
         out["kelly"] = out["max_profit"]   # 賣出規則同 max_profit (EV 停止)
-        out["winrate"] = 1.0 if (last or price >= base or price >= cont) else 0.0
+        # winrate(保本勝率): 有賺就鎖, 但『很可能還能拿更多 (現價 < 保守剩餘最高 q10)』時不賣,
+        # 不平白丟掉幾乎穩賺的多賺空間。cont_lo 缺時退回舊規則 (一有賺就賣)。
+        if cont_lo is None:
+            out["winrate"] = 1.0 if (last or price >= base or price >= cont) else 0.0
+        else:
+            out["winrate"] = 1.0 if (last or price >= cont
+                                     or (price >= base and price >= cont_lo)) else 0.0
         out["cvar"] = 1.0 if (last or price >= cont + self.cvar_risk_offset * base) else 0.0
         return out
 
